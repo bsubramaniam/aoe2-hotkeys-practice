@@ -2,6 +2,9 @@
 
 A static Vite + TypeScript hotkey trainer for Age of Empires II.
 
+**Status: Beta.** The trainer is usable, but hotkey mappings and behavior may
+still contain errors. Feedback and bug reports are welcome.
+
 **Hosted prototype:** [aoe2hotkey.vejak-app.workers.dev](https://aoe2hotkey.vejak-app.workers.dev/)
 
 ## Features
