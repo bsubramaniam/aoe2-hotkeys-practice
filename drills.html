@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Browse built-in and browser-local AoE II hotkey practice drills." />
+    <meta name="theme-color" content="#171a19" />
+    <title>Drills | AoE II Hotkey Practice</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <div class="site-shell">
+      <header class="site-header" aria-label="AoE II Hotkey Practice">
+        <a class="brand" href="/" aria-label="AoE II Hotkey Practice home">
+          <span class="brand__mark" aria-hidden="true">II</span>
+          <span><strong>Hotkey Practice</strong><small>Age of Empires II</small></span>
+        </a>
+        <nav class="site-nav" aria-label="Primary navigation">
+          <a href="/drills" class="site-nav__link site-nav__link--active" aria-current="page">Drills</a>
+        </nav>
+        <span class="local-badge"><span aria-hidden="true">●</span> Runs locally</span>
+      </header>
+      <main id="main-content">
+        <div id="app">
+          <section class="hero hero--drills" aria-labelledby="drills-title">
+            <p class="eyebrow">Built-in and browser-local practice</p>
+            <h1 id="drills-title">Your drill<br><em>library.</em></h1>
+            <p class="hero__lede">Review every available drill or add your own training sequences.</p>
+          </section>
+          <div class="setup-layout drills-layout">
+            <section class="setup-panel drill-library" aria-labelledby="drill-library-title">
+              <div class="section-heading">
+                <span class="section-number">01</span>
+                <div><p>Drill library</p><h2 id="drill-library-title">Available drills</h2></div>
+              </div>
+              <div class="drill-list" id="drill-list">
+                <article class="drill-card">
+                  <div class="drill-card__select">
+                    <div class="drill-card__title-row"><h3>Villager Building Placement</h3><span class="status-pill">Built-in</span></div>
+                    <p>Open the correct build menu, choose the requested building, then place it in the marked zone.</p>
+                    <dl class="drill-card__meta"><div><dt>Duration</dt><dd>2:17</dd></div><div><dt>Sequences</dt><dd>21</dd></div></dl>
+                  </div>
+                </article>
+              </div>
+            </section>
+            <aside class="mapping-panel drill-actions-panel" aria-labelledby="drill-actions-title">
+              <div class="mapping-panel__header">
+                <div><p class="eyebrow">Custom drills</p><h2 id="drill-actions-title">Add a drill</h2></div>
+                <span>Stored locally</span>
+              </div>
+              <div class="drill-action-list">
+                <article><span class="section-number" aria-hidden="true">+</span><h3>Create drill</h3><p>Build a custom sequence with hotkeys and click zones.</p><a class="button button--start" id="create-drill-button" href="/drills/create.html">Create drill</a></article>
+                <article><span class="section-number" aria-hidden="true">UP</span><h3>Upload drill</h3><p>Custom drill JSON files are validated and stored in this browser.</p><label class="button button--secondary" for="drill-json-file">Choose JSON file</label><input id="drill-json-file" type="file" accept=".json,application/json" /></article>
+                <p class="upload-message" id="drill-message" role="status">Custom drills remain in this browser.</p>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </main>
+      <footer class="site-footer">
+        <nav class="footer-links" aria-label="Legal and feedback">
+          <a href="/privacy">Privacy &amp; Beta Terms</a>
+          <a href="mailto:vejak.app@gmail.com">Feedback</a>
+          <span>Unofficial fan-made tool</span>
+        </nav>
+      </footer>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

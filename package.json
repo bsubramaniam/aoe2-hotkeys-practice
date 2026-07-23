@@ -1,0 +1,29 @@
+{
+  "name": "aoe2-hotkey-practice",
+  "private": true,
+  "version": "1.0.0",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": "^22.12.0 || >=24.0.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build && node scripts/validate-dist.mjs",
+    "generate:default-profile": "node --experimental-strip-types scripts/generate-default-profile.mjs",
+    "preview": "vite preview",
+    "pretest": "npm run build",
+    "test": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@vitest/coverage-v8": "^4.1.10",
+    "jsdom": "^29.1.1",
+    "typescript": "7.0.2",
+    "vite": "8.1.5",
+    "vitest": "4.1.10"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3"
+  }
+}

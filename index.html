@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Practice Age of Empires II hotkey sequences and click placement in your browser."
+    />
+    <meta name="theme-color" content="#171a19" />
+    <title>AoE II Hotkey Practice</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <div class="site-shell">
+      <header class="site-header" aria-label="AoE II Hotkey Practice">
+        <a class="brand" href="/" aria-label="AoE II Hotkey Practice home">
+          <span class="brand__mark" aria-hidden="true">II</span>
+          <span><strong>Hotkey Practice</strong><small>Age of Empires II</small></span>
+        </a>
+        <nav class="site-nav" aria-label="Primary navigation">
+          <a href="/drills" class="site-nav__link">Drills</a>
+        </nav>
+        <span class="local-badge"><span aria-hidden="true">●</span> Runs locally</span>
+      </header>
+      <main id="main-content">
+        <div id="app">
+          <div id="setup-screen">
+          <section class="hero" aria-labelledby="page-title">
+            <p class="eyebrow">Build muscle memory before the match</p>
+            <h1 id="page-title">Your hotkeys.<br><em>Under pressure.</em></h1>
+            <p class="hero__lede">Load your AoE II profile, choose a pace, and drill building sequences against the clock.</p>
+          </section>
+          <div class="setup-layout">
+            <section class="setup-panel" aria-labelledby="setup-title">
+              <div class="section-heading">
+                <span class="section-number">01</span>
+                <div><p>Session setup</p><h2 id="setup-title">Prepare your drill</h2></div>
+              </div>
+              <div class="setup-block setup-block--split">
+                <div>
+                  <label for="drill-select"><span class="step-label">Step one</span>Drill</label>
+                  <select id="drill-select"><option value="0">Villager Building Placement</option></select>
+                </div>
+                <div>
+                  <label for="difficulty-select"><span class="step-label">Step two</span>Difficulty</label>
+                  <select id="difficulty-select">
+                    <option value="0">Easiest</option><option value="1">Easy</option><option value="2" selected>Moderate</option><option value="3">Hard</option><option value="4">Hardest</option><option value="5">Extreme</option><option value="6">Pro</option>
+                  </select>
+                </div>
+              </div>
+              <div class="drill-summary">
+                <div><span>Duration</span><strong id="drill-duration">2:17</strong></div>
+                <div><span>Sequences</span><strong id="drill-sequences">21</strong></div>
+                <div><span>Click zones</span><strong id="drill-zones">20</strong></div>
+              </div>
+              <div class="mapping-warning" id="mapping-warning" role="alert" hidden><strong></strong><span>Load Hotkeys.hkp and Base.hkp from the same profile, or assign the missing commands in AoE II.</span></div>
+              <button class="button button--start" id="start-button" type="button"><span>Start practice</span><span aria-hidden="true">→</span></button>
+            </section>
+            <aside class="mapping-panel" aria-labelledby="mapping-title">
+              <section class="profile-controls" aria-labelledby="profile-controls-title">
+                <div class="profile-controls__header"><div><p class="eyebrow">Hotkey profile</p><h2 id="profile-controls-title">Choose your keys</h2></div><span class="status-pill status-pill--ready" id="profile-status">Ready</span></div>
+                <label class="profile-source-label" for="profile-source">Hotkey set</label>
+                <select id="profile-source"><option value="default">AoE II: Definitive Edition defaults</option><option value="custom">Custom uploaded files</option></select>
+                <div class="profile-upload" data-drop-zone><strong id="profile-upload-title">Upload custom files</strong><span>Hotkeys.hkp + Base.hkp</span><label class="button button--secondary" for="hotkey-files">Choose both files</label><input id="hotkey-files" type="file" accept=".hki,.hkp" multiple /></div>
+                <p class="upload-message" id="upload-message" role="status">Choose both Hotkeys.hkp and Base.hkp from the same AoE II hotkey profile.</p>
+                <div class="file-chips" id="file-chips" aria-label="Loaded files" hidden></div>
+              </section>
+              <div class="mapping-panel__header">
+                <div><p class="eyebrow">Live reference</p><h2 id="mapping-title">Hotkey map</h2></div>
+                <span id="mapping-action-count">0 actions</span>
+              </div>
+              <p class="mapping-panel__intro">These are the commands used by the selected drill.</p>
+              <ul class="mapping-list" id="mapping-list"></ul>
+            </aside>
+          </div>
+          </div>
+          <section id="practice-screen" hidden aria-label="Active practice session"></section>
+          <section id="results-screen" hidden aria-labelledby="results-title"></section>
+        </div>
+      </main>
+      <footer class="site-footer">
+        <nav class="footer-links" aria-label="Legal and feedback">
+          <a href="/privacy">Privacy &amp; Beta Terms</a>
+          <a href="mailto:vejak.app@gmail.com">Feedback</a>
+          <span>Unofficial fan-made tool</span>
+        </nav>
+      </footer>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

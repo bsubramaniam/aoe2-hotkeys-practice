@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://aoe2hotkey.vejak-app.workers.dev/sitemap.xml
