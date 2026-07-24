@@ -43,15 +43,23 @@ describe("generated Cloudflare artifact", () => {
 
   it("emits distinct authored documents instead of copied application shells", () => {
     const pages = pagePaths.map(readDist);
+    const home = readDist("index.html");
+    const drills = readDist("drills.html");
 
     expect(new Set(pages).size).toBe(pagePaths.length);
     expect(pages.every((page) => !page.includes('<div id="app"></div>'))).toBe(true);
-    expect(readDist("index.html")).toContain('id="page-title"');
+    expect(home).toContain('id="page-title"');
     expect(readDist("404.html")).toContain('id="not-found-title"');
-    expect(readDist("drills.html")).toContain('id="drills-title"');
+    expect(drills).toContain('id="drills-title"');
     expect(readDist("drills/create.html")).toContain('id="create-drill-title"');
     expect(readDist("drills/edit.html")).toContain('id="edit-drill-title"');
     expect(readDist("privacy.html")).toContain("Privacy &amp; Beta Terms");
+    expect(home).toContain('<option value="1">Standard</option>');
+    expect(home).toContain('<strong id="drill-duration">1:29</strong>');
+    expect(drills).toContain("confirm it with a left click");
+    expect(drills).toContain("<dt>Moderate duration</dt><dd>1:29</dd>");
+    expect(drills).toContain("hotkeys and left clicks");
+    expect(drills).not.toMatch(/marked zone|click zones/i);
   });
 
   it("keeps Cloudflare output flat without folder-index fallbacks", () => {
