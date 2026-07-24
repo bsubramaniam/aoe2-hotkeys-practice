@@ -265,9 +265,9 @@ describe("application pages", () => {
     expect(document.querySelectorAll(".command-tile")).toHaveLength(15);
     expect(document.querySelectorAll(".command-tile:not(.command-tile--empty)")).toHaveLength(2);
     expect(document.querySelector(".command-tile--active")?.getAttribute("aria-label")).toContain("Military Buildings");
-    expect(document.querySelector(".sequence-target__category")?.textContent).toBe("Military building");
-    expect(document.querySelector(".sequence-target strong")?.textContent).toBe("Archery Range");
-    expect(document.querySelector<HTMLImageElement>(".sequence-target__sprite")?.src).toContain("military-buildings-panel.png");
+    expect(document.querySelector(".sequence-target__category")?.textContent).toBe("Villager commands");
+    expect(document.querySelector(".sequence-target strong")?.textContent).toBe("Military Buildings");
+    expect(document.querySelector<HTMLImageElement>(".sequence-target__sprite")?.src).toContain("villager-command-panel.png");
     expect(document.querySelector(".sequence-target__sprite")?.classList.contains("sequence-target__sprite--slot-1")).toBe(true);
 
     press("open_military_buildings");
@@ -276,12 +276,18 @@ describe("application pages", () => {
     expect(document.querySelector(".command-tile--active")?.getAttribute("aria-label")).toContain("Archery Range");
     expect(document.querySelector(".command-tile--active")?.classList.contains("command-tile--slot-1")).toBe(true);
     expect(document.querySelector(".command-panel--military .command-tile--active")).not.toBeNull();
+    expect(document.querySelector(".sequence-target__category")?.textContent).toBe("Military building");
+    expect(document.querySelector(".sequence-target strong")?.textContent).toBe("Archery Range");
+    expect(document.querySelector<HTMLImageElement>(".sequence-target__sprite")?.src).toContain("military-buildings-panel.png");
+    expect(document.querySelector(".sequence-target__sprite")?.classList.contains("sequence-target__sprite--slot-1")).toBe(true);
 
     press("build_archery_range");
     expect(document.querySelector(".command-panel--military")).not.toBeNull();
     expect(document.querySelector(".command-tile--active")?.getAttribute("aria-label")).toContain("Archery Range");
     expect(document.querySelector("#click-anywhere-target")).not.toBeNull();
     expect(document.body.textContent).toContain("Left-click anywhere");
+    expect(document.querySelector(".sequence-target strong")?.textContent).toBe("Archery Range");
+    expect(document.querySelector<HTMLImageElement>(".sequence-target__sprite")?.src).toContain("military-buildings-panel.png");
   });
 
   it("renders every sequence state, feedback outcome, and result status", async () => {

@@ -156,10 +156,15 @@ export function commandPanelState(sequence: Sequence, stepIndex: number): Comman
   };
 }
 
-export function sequenceTargetState(sequence: Sequence): SequenceTargetState | null {
+export function sequenceTargetState(
+  sequence: Sequence,
+  stepIndex: number,
+): SequenceTargetState | null {
   let context = contextForStartingSelection(sequence.startingSelection);
   let target: SequenceTargetState | null = null;
-  for (const step of sequence.steps) {
+  for (let index = 0; index <= stepIndex; index += 1) {
+    const step = sequence.steps[index];
+    if (!step) break;
     if (step.type !== "hotkey") continue;
     const definition = contextDefinition(context);
     const entry = entryForAction(definition, step.action);
@@ -189,12 +194,16 @@ function element<K extends keyof HTMLElementTagNameMap>(
 }
 
 export function renderSequenceTarget(current: Session): HTMLElement {
-  const state = sequenceTargetState(current.currentSequence);
+  const state = sequenceTargetState(current.currentSequence, current.stepIndex);
+  const step = current.currentSequence.steps[current.stepIndex];
+  const currentLabel = step?.type === "click"
+    ? state?.label ?? step.label
+    : step?.label ?? current.currentSequence.name;
   const target = element("div", { className: "sequence-target" });
-  target.setAttribute("aria-label", `Target: ${current.currentSequence.name}`);
+  target.setAttribute("aria-label", `Current step: ${currentLabel}`);
   target.append(element("span", {
     className: "sequence-target__category",
-    text: state?.category ?? "Sequence target",
+    text: state?.category ?? "Current step",
   }));
 
   if (state) {
@@ -210,8 +219,7 @@ export function renderSequenceTarget(current: Session): HTMLElement {
     target.append(icon);
   }
 
-  target.append(element("strong", { text: current.currentSequence.name }));
-  const step = current.currentSequence.steps[current.stepIndex];
+  target.append(element("strong", { text: currentLabel }));
   const clickInstruction = element("small", {
     className: `sequence-target__instruction${step?.type === "click" ? "" : " sequence-target__instruction--reserved"}`,
     text: step?.type === "click" ? "Left-click anywhere" : "\u00a0",

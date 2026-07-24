@@ -390,6 +390,7 @@ describe("built-in command panel", () => {
         [{ type: "hotkey", action: "hotkey_19035", label: "Militia" }],
         { type: "building", id: "barracks" },
       ),
+      0,
     )).toMatchObject({
       asset: "barracks-panel.png",
       category: "Barracks Commands",
@@ -401,14 +402,20 @@ describe("built-in command panel", () => {
         [{ type: "hotkey", action: "select_villager", label: "Select" }],
         { type: "none" },
       ),
+      0,
     )).toBeNull();
 
-    expect(sequenceTargetState(
-      sequence([
+    const university = sequence([
         { type: "hotkey", action: "open_economic_buildings", label: "Economic" },
         { type: "hotkey", action: "build_university", label: "University" },
-      ]),
-    )).toMatchObject({
+      ]);
+    expect(sequenceTargetState(university, 0)).toMatchObject({
+      asset: "villager-command-panel.png",
+      category: "Villager commands",
+      label: "Economic Buildings",
+      slot: 0,
+    });
+    expect(sequenceTargetState(university, 1)).toMatchObject({
       asset: "economic-buildings-panel.png",
       category: "Economic building",
       slot: 9,
@@ -418,6 +425,7 @@ describe("built-in command panel", () => {
         { type: "hotkey", action: "open_military_buildings", label: "Military" },
         { type: "hotkey", action: "build_castle", label: "Castle" },
       ]),
+      1,
     )).toMatchObject({
       asset: "military-buildings-panel.png",
       category: "Military building",
@@ -429,6 +437,7 @@ describe("built-in command panel", () => {
         { type: "hotkey", action: "hotkey_19035", label: "Militia" },
         { type: "click", label: "Continue" },
       ], { type: "building", id: "barracks" }),
+      1,
     )).toMatchObject({
       asset: "barracks-panel.png",
       category: "Barracks Commands",
@@ -440,6 +449,7 @@ describe("built-in command panel", () => {
         action: "open_military_buildings",
         label: "Military Buildings",
       }]),
+      0,
     )).toMatchObject({
       asset: "villager-command-panel.png",
       category: "Villager commands",
@@ -450,21 +460,38 @@ describe("built-in command panel", () => {
         [{ type: "click", label: "Continue" }],
         { type: "none" },
       ),
+      0,
     )).toBeNull();
 
     const sharedAction = "hotkey_19002";
     expect(sequenceTargetState(sequence(
       [{ type: "hotkey", action: sharedAction, label: "Set Gather Point" }],
       { type: "building", id: "barracks" },
-    ))?.asset).toBe("barracks-panel.png");
+    ), 0)?.asset).toBe("barracks-panel.png");
     expect(sequenceTargetState(sequence(
       [{ type: "hotkey", action: sharedAction, label: "Set Gather Point" }],
       { type: "building", id: "dock" },
-    ))?.asset).toBe("dock-panel.png");
+    ), 0)?.asset).toBe("dock-panel.png");
     expect(sequenceTargetState(sequence(
       [{ type: "hotkey", action: sharedAction, label: "Set Gather Point" }],
       { type: "none" },
-    ))).toBeNull();
+    ), 0)).toBeNull();
+
+    const mining = sequence([
+      { type: "hotkey", action: "open_economic_buildings", label: "Economic Buildings" },
+      { type: "hotkey", action: "build_mining_camp", label: "Mining Camp" },
+      { type: "click", label: "Place Mining Camp" },
+    ]);
+    expect(sequenceTargetState(mining, 0)).toMatchObject({
+      asset: "villager-command-panel.png",
+      label: "Economic Buildings",
+      slot: 0,
+    });
+    expect(sequenceTargetState(mining, 1)).toMatchObject({
+      asset: "economic-buildings-panel.png",
+      label: "Mining Camp",
+    });
+    expect(sequenceTargetState(mining, 2)).toEqual(sequenceTargetState(mining, 1));
   });
 
   it("renders the game icon and left-click instruction for the sequence target", () => {
@@ -474,9 +501,9 @@ describe("built-in command panel", () => {
     ], { type: "building", id: "barracks" });
     const target = renderSequenceTarget(session(current, 1, "barracks-commands"));
 
-    expect(target.getAttribute("aria-label")).toBe("Target: Test");
+    expect(target.getAttribute("aria-label")).toBe("Current step: Militia-line");
     expect(target.querySelector(".sequence-target__category")?.textContent).toBe("Barracks Commands");
-    expect(target.querySelector("strong")?.textContent).toBe("Test");
+    expect(target.querySelector("strong")?.textContent).toBe("Militia-line");
     expect(target.querySelector("small")?.textContent).toBe("Left-click anywhere");
     expect(target.querySelector("img")?.getAttribute("src")).toBe(
       "/assets/microsoft-game-content/barracks-panel.png",
@@ -489,9 +516,27 @@ describe("built-in command panel", () => {
       "custom",
     ));
     expect(fallback.querySelector("img")).toBeNull();
-    expect(fallback.querySelector(".sequence-target__category")?.textContent).toBe("Sequence target");
+    expect(fallback.getAttribute("aria-label")).toBe("Current step: Unknown");
+    expect(fallback.querySelector(".sequence-target__category")?.textContent).toBe("Current step");
+    expect(fallback.querySelector("strong")?.textContent).toBe("Unknown");
     expect(fallback.querySelector("small")?.classList.contains("sequence-target__instruction--reserved")).toBe(true);
     expect(fallback.querySelector("small")?.getAttribute("aria-hidden")).toBe("true");
+
+    const selection = renderSequenceTarget(session(
+      sequence(
+        [{
+          type: "hotkey",
+          action: "select_villager",
+          label: "Go to Next Idle Villager",
+        }],
+        { type: "none" },
+      ),
+      0,
+      "custom",
+    ));
+    expect(selection.querySelector("img")).toBeNull();
+    expect(selection.querySelector(".sequence-target__category")?.textContent).toBe("Current step");
+    expect(selection.querySelector("strong")?.textContent).toBe("Go to Next Idle Villager");
   });
 
   it("renders empty, active, mapped, and unmapped tiles accessibly", () => {
