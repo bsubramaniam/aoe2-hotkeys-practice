@@ -40,12 +40,12 @@ physical keys. Drills do not store physical keys.
 A drill contains:
 
 - a name and description;
-- a session time limit; and
 - one or more ordered sequences.
 
 A sequence contains:
 
 - a name;
+- the unit, building or empty selection active at its start;
 - one or more ordered steps; and
 - a target completion time for each difficulty.
 
@@ -54,10 +54,7 @@ A step is either:
 - a logical hotkey action; or
 - a left click.
 
-Each step defines what happens after an incorrect hotkey:
-
-- `wait` keeps the player on the same step; and
-- `restart sequence` returns the player to the first step of that sequence.
+An incorrect input counts as a try and leaves the player on the current step.
 
 Built-in drills are read-only. Custom drills can use any supported logical
 hotkey action.
@@ -77,8 +74,9 @@ The difficulties are:
 Difficulty changes the target time for a sequence. It does not change the
 sequence steps.
 
-The session ends when every sequence is completed or the drill time limit is
-reached. Exceeding a sequence target time does not stop or restart the
+The session target is the sum of its sequence targets at the selected
+difficulty. The session ends when every sequence is completed or that overall
+target is reached. Exceeding one sequence's target does not stop or restart the
 sequence.
 
 ## Input behaviour
@@ -131,12 +129,12 @@ Players can create, edit, delete, import and export custom drills.
 
 The custom-drill editor supports:
 
-- drill name, description and time limit;
+- drill name and description;
 - sequences and sequence names;
+- the selection active at the start of each sequence;
 - ordered hotkey and left-click steps;
-- failure behaviour for each step;
-- optional step tips; and
-- target times for every difficulty.
+- a Pro target time for each sequence; and
+- automatically calculated targets for the other difficulties.
 
 Custom drills are imported and exported as JSON. Invalid files are rejected
 without partially saving their contents.

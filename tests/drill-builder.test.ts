@@ -205,6 +205,45 @@ describe("drill builder", () => {
     expect(new Set(sequenceIds)).toHaveLength(3);
   });
 
+  it("inherits starting selection without activating search results on the add-sequence shortcut", () => {
+    mountDrillBuilder(root, {
+      actions,
+      bindingForAction: () => "Q",
+      onBack: vi.fn(),
+      onSave: vi.fn(),
+    });
+
+    root.querySelector<HTMLInputElement>("#sequence-starting-selection")?.focus();
+    pressKey(root, "#sequence-starting-selection", "ArrowDown");
+    pressKey(root, "#sequence-starting-selection", "Enter");
+    expect(root.querySelector<HTMLInputElement>("#sequence-starting-selection")?.value)
+      .toBe("Barracks");
+
+    changeInput(root, "#step-search", "house");
+    root.querySelector<HTMLInputElement>("#step-search")?.dispatchEvent(new KeyboardEvent(
+      "keydown",
+      { bubbles: true, ctrlKey: true, key: "Enter" },
+    ));
+
+    expect(root.textContent).toContain("Sequence 2 of 2");
+    expect(root.querySelector<HTMLInputElement>("#sequence-starting-selection")?.value)
+      .toBe("Barracks");
+    click(root, '[data-sequence-index="0"]');
+    expect(root.querySelectorAll(".builder-step")).toHaveLength(0);
+    click(root, '[data-sequence-index="1"]');
+
+    root.querySelector<HTMLInputElement>("#sequence-starting-selection")?.focus();
+    changeInput(root, "#sequence-starting-selection", "stable");
+    root.querySelector<HTMLInputElement>("#sequence-starting-selection")?.dispatchEvent(new KeyboardEvent(
+      "keydown",
+      { bubbles: true, metaKey: true, key: "Enter" },
+    ));
+
+    expect(root.textContent).toContain("Sequence 3 of 3");
+    expect(root.querySelector<HTMLInputElement>("#sequence-starting-selection")?.value)
+      .toBe("Barracks");
+  });
+
   it("edits and deletes an existing drill", () => {
     const drill: Drill = {
       id: "existing",

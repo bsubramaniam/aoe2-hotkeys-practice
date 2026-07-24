@@ -567,7 +567,11 @@ export function mountDrillBuilder(root: HTMLElement, options: BuilderOptions): v
   }
 
   function addSequence(): void {
-    sequences.push(newSequence(nextSequenceNumber(sequences)));
+    const previous = currentSequence();
+    const next = newSequence(nextSequenceNumber(sequences));
+    next.startingSelection = { ...previous.startingSelection };
+    next.startingSelectionText = selectedAtStartLabel(previous.startingSelection);
+    sequences.push(next);
     switchSequence(sequences.length - 1, true);
   }
 
@@ -645,7 +649,7 @@ export function mountDrillBuilder(root: HTMLElement, options: BuilderOptions): v
           matches.length,
         );
         renderAndRestoreSelectionFocus();
-      } else if (event.key === "Enter") {
+      } else if (event.key === "Enter" && !event.ctrlKey && !event.metaKey) {
         const choice = matches[selectionActiveIndex];
         if (choice) {
           event.preventDefault();
@@ -712,7 +716,7 @@ export function mountDrillBuilder(root: HTMLElement, options: BuilderOptions): v
           matches.length,
         );
         renderAndRestoreSearchFocus();
-      } else if (event.key === "Enter") {
+      } else if (event.key === "Enter" && !event.ctrlKey && !event.metaKey) {
         const activeMatch = matches[stepActiveIndex];
         if (activeMatch) {
           event.preventDefault();
