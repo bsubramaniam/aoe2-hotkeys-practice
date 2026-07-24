@@ -3,6 +3,7 @@ import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { containsHtmlTemplateLiteral, validateDist } from "../scripts/validate-dist.mjs";
+import { BUILTIN_COMMAND_PANELS } from "../src/builtin-command-panels";
 
 const distDirectory = resolve("dist");
 const sourceDirectory = resolve("src");
@@ -176,6 +177,19 @@ describe("generated Cloudflare artifact", () => {
   it("ships the required runtime dependency notice", () => {
     const notices = readDist("THIRD_PARTY_NOTICES.txt");
 
+    for (const panel of [
+      "villager-command-panel.png",
+      "economic-buildings-panel.png",
+      "military-buildings-panel.png",
+      ...BUILTIN_COMMAND_PANELS.map((definition) => definition.asset),
+    ]) {
+      expect(existsSync(join(distDirectory, "assets", "microsoft-game-content", panel)), panel).toBe(true);
+    }
+    expect(notices).toContain("assets/microsoft-game-content/");
+    expect(notices).toContain("Game Content Usage Rules");
+    expect(notices).toContain("must comply with");
+    expect(notices).toContain("remove and replace the files");
+    expect(notices).toMatch(/not endorsed by or\s+affiliated with Microsoft/);
     expect(notices).toContain("fflate 0.8.3");
     expect(notices).toContain("Copyright (c) 2026 Arjun Barrett");
     expect(notices).toContain("MIT License");
@@ -186,13 +200,20 @@ describe("generated Cloudflare artifact", () => {
     const visibleText = privacy.replace(/<[^>]+>/g, " ");
 
     expect(privacy).not.toMatch(/<script\b/i);
+    expect(privacy).toContain("Last updated: 24 July 2026");
     expect(privacy).toContain("Only custom drills are stored persistently");
+    expect(privacy).toContain("browser-local drill ID");
+    expect(privacy).toContain("derived from its name");
     expect(privacy).toContain("does not use cookies or local storage for analytics");
-    expect(privacy).toContain("does not track individual visitors");
-    expect(privacy).toContain("does not collect or use visitors' personal data");
+    expect(privacy).toContain("does not fingerprint individuals for analytics");
+    expect(privacy).toContain("strictly necessary security cookies");
+    expect(privacy).toContain("does not transmit the contents of your hotkey files");
     expect(privacy).toContain("Use of the trainer and imported drill files is at your own risk.");
-    expect(privacy).not.toContain("Game Content Usage Rules");
-    expect(privacy.match(/not endorsed by or affiliated with/g)).toHaveLength(1);
+    expect(privacy).toContain("Game Content Usage Rules");
+    expect(privacy).toContain("https://www.xbox.com/en-us/developers/rules");
+    expect(privacy).toContain("MIT License does not cover the cropped Microsoft game content");
+    expect(privacy).toContain("must comply with Microsoft");
+    expect(privacy.match(/not endorsed by or affiliated with/g)).toHaveLength(2);
     expect(visibleText).not.toContain("vejak.app@gmail.com");
     expect(privacy).toContain("mailto:vejak.app@gmail.com");
   });

@@ -60,6 +60,8 @@ const virtualKeyNames = new Map<number, string>([
   [220, "\\"],
   [221, "]"],
   [222, "'"],
+  [254, "WheelDown"],
+  [255, "WheelUp"],
 ]);
 
 class Reader {
@@ -131,8 +133,14 @@ function readMenu(reader: Reader): ParsedHotkey[] {
     const shift = reader.uint8() !== 0;
     const mouse = reader.uint8() !== 0;
     const key = keyNameFromCode(keyCode);
-    if (key && !mouse) {
-      hotkeys.push({ key, stringId, ctrl, alt, shift });
+    if (key && (!mouse || key === "WheelUp" || key === "WheelDown")) {
+      hotkeys.push({
+        key,
+        stringId,
+        ctrl: key.startsWith("Wheel") ? false : ctrl,
+        alt: key.startsWith("Wheel") ? false : alt,
+        shift: key.startsWith("Wheel") ? false : shift,
+      });
     }
   }
   return hotkeys;
@@ -216,7 +224,13 @@ function parseTagged(buffer: ArrayBuffer): ParsedHotkey[] {
     const shift = view.getUint8(recordOffset + 10) !== 0;
     const key = keyNameFromCode(keyCode);
     if (key) {
-      hotkeys.push({ key, stringId, ctrl, alt, shift });
+      hotkeys.push({
+        key,
+        stringId,
+        ctrl: key.startsWith("Wheel") ? false : ctrl,
+        alt: key.startsWith("Wheel") ? false : alt,
+        shift: key.startsWith("Wheel") ? false : shift,
+      });
     }
     searchFrom = recordEnd + HANDLER_BASE_GROUP_END.length;
   }
@@ -364,6 +378,18 @@ export function eventMatchesBinding(event: KeyboardEvent, binding: HotkeyBinding
     && event.altKey === binding.alt
     && event.shiftKey === binding.shift
     && !event.metaKey;
+}
+
+export function isWheelBinding(binding: HotkeyBinding): boolean {
+  return binding.key === "WheelUp" || binding.key === "WheelDown";
+}
+
+export function wheelEventMatchesBinding(event: WheelEvent, binding: HotkeyBinding): boolean {
+  const key = event.deltaY < 0 ? "WheelUp" : event.deltaY > 0 ? "WheelDown" : null;
+  return key === binding.key
+    && event.ctrlKey === binding.ctrl
+    && event.altKey === binding.alt
+    && event.shiftKey === binding.shift;
 }
 
 export function formatBinding(binding: HotkeyBinding): string {

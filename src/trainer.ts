@@ -1,30 +1,20 @@
-import { CLICK_ZONES } from "./click-zones";
 import type { Drill, Sequence, SequenceTemplate, Session, Step } from "./types";
 
-export type RandomSource = () => number;
-
-function sequenceAt(drill: Drill, index: number, random: RandomSource): { sequence: Sequence; index: number } {
+function sequenceAt(drill: Drill, index: number): { sequence: Sequence; index: number } {
   if (drill.sequences.length === 0) {
     throw new Error("A drill must contain at least one sequence.");
   }
   const template = drill.sequences[index];
   if (!template) throw new Error("Unable to select a drill sequence.");
-  return { sequence: materializeSequence(template, random), index };
+  return { sequence: materializeSequence(template), index };
 }
 
-function materializeSequence(template: SequenceTemplate, random: RandomSource): Sequence {
-  const steps: Step[] = template.steps.map((step) => {
-    if (step.type === "hotkey") {
-      return { ...step };
-    }
-    const zone = step.zone === "random"
-      ? CLICK_ZONES[Math.floor(random() * CLICK_ZONES.length)]?.id
-      : step.zone;
-    if (zone === undefined) {
-      throw new Error("A click step requires at least one click zone.");
-    }
-    return { ...step, zone };
-  });
+function materializeSequence(template: SequenceTemplate): Sequence {
+  const steps: Step[] = template.steps.map((step) =>
+    step.type === "click"
+      ? { ...step, label: "Left click anywhere" }
+      : { ...step }
+  );
 
   return { id: template.id, name: template.name, steps, targetTimeMs: template.targetTimeMs };
 }
@@ -33,9 +23,8 @@ export function createSession(
   drill: Drill,
   difficultyIndex: number,
   now: number,
-  random: RandomSource = Math.random,
 ): Session {
-  const selected = sequenceAt(drill, 0, random);
+  const selected = sequenceAt(drill, 0);
   return {
     drill,
     difficultyIndex,
@@ -100,7 +89,6 @@ export function submitAttempt(
   session: Session,
   correct: boolean,
   now: number,
-  random: RandomSource = Math.random,
 ): Session {
   if (session.status !== "running") {
     return session;
@@ -151,7 +139,7 @@ export function submitAttempt(
       results: [...session.results, result],
     };
   }
-  const selected = sequenceAt(session.drill, nextIndex, random);
+  const selected = sequenceAt(session.drill, nextIndex);
 
   return {
     ...attempted,

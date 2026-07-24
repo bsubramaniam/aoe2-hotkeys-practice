@@ -65,14 +65,14 @@ describe("drill builder", () => {
     changeInput(root, "#sequence-name", "House");
 
     click(root, "#add-click-step");
-    expect(root.querySelectorAll(".zone-choice")).toHaveLength(20);
-    click(root, '[data-select-step-zone="20"]');
-    expect(root.textContent).toContain("Click zone 20");
+    expect(root.querySelectorAll(".zone-choice")).toHaveLength(0);
+    expect(root.textContent).toContain("Left click anywhere");
+    expect(root.textContent).toContain("Left click");
 
     const tip = root.querySelector<HTMLInputElement>('[data-step-tip="0"]');
     const failure = root.querySelector<HTMLSelectElement>('[data-step-failure="0"]');
     if (!tip || !failure) throw new Error("Step fields are missing.");
-    tip.value = "Bottom right";
+    tip.value = "Confirm placement";
     tip.dispatchEvent(new Event("input", { bubbles: true }));
     failure.value = "restart_sequence";
     failure.dispatchEvent(new Event("change", { bubbles: true }));
@@ -94,7 +94,7 @@ describe("drill builder", () => {
       sequences: [{
         name: "House",
         steps: [
-          { type: "click", zone: 20, tip: "Bottom right", onFailure: "restart_sequence" },
+          { type: "click", label: "Left click anywhere", tip: "Confirm placement", onFailure: "restart_sequence" },
           { type: "hotkey", action: "select_villager" },
         ],
       }],
@@ -120,8 +120,6 @@ describe("drill builder", () => {
     click(root, "#close-hotkey-modal");
 
     click(root, "#add-click-step");
-    click(root, '[data-expand-click="0"]');
-    click(root, '[data-expand-click="0"]');
     click(root, '[data-delete-step="0"]');
     expect(root.textContent).toContain("Add the first hotkey");
 
@@ -143,7 +141,7 @@ describe("drill builder", () => {
         id: "one",
         name: "One",
         targetTimeMs: [7000, 6000, 5000, 4000, 3000, 2000, 1000],
-        steps: [{ type: "click", zone: "random", label: "Random zone", onFailure: "wait" }],
+        steps: [{ type: "click", label: "Left click anywhere", onFailure: "wait" }],
       }],
     };
     const onDelete = vi.fn();
@@ -158,6 +156,8 @@ describe("drill builder", () => {
     });
 
     expect(root.textContent).toContain("Edit custom drill");
+    expect(root.textContent).toContain("Left click anywhere");
+    expect(root.textContent).not.toContain("Zone 18");
     click(root, "#delete-drill");
     expect(onDelete).toHaveBeenCalledOnce();
     click(root, "#save-drill");
@@ -203,10 +203,7 @@ describe("drill builder", () => {
     click(root, "#add-click-step");
     const staleTip = root.querySelector<HTMLInputElement>('[data-step-tip="0"]');
     const staleFailure = root.querySelector<HTMLSelectElement>('[data-step-failure="0"]');
-    const staleZone = root.querySelector<HTMLButtonElement>("[data-select-step-zone]");
-    if (!staleTip || !staleFailure || !staleZone) throw new Error("Step controls are missing.");
-    staleZone.dataset.stepIndex = "99";
-    staleZone.click();
+    if (!staleTip || !staleFailure) throw new Error("Step controls are missing.");
     click(root, '[data-delete-step="0"]');
     staleTip.dispatchEvent(new Event("input", { bubbles: true }));
     staleFailure.dispatchEvent(new Event("change", { bubbles: true }));

@@ -21,7 +21,6 @@ export interface HotkeyStep {
 
 export interface ClickStep {
   type: "click";
-  zone: number;
   label: string;
   tip?: string;
   onFailure: FailureHandling;
@@ -32,7 +31,7 @@ export type Step = HotkeyStep | ClickStep;
 export interface SequenceTemplate {
   id: string;
   name: string;
-  steps: ReadonlyArray<HotkeyStep | (Omit<ClickStep, "zone"> & { zone: number | "random" })>;
+  steps: ReadonlyArray<Step>;
   targetTimeMs: readonly [number, number, number, number, number, number, number];
 }
 
@@ -41,12 +40,6 @@ export interface Sequence {
   name: string;
   steps: Step[];
   targetTimeMs: SequenceTemplate["targetTimeMs"];
-}
-
-export interface ClickZone {
-  id: number;
-  xPercent: number;
-  yPercent: number;
 }
 
 export interface Drill {

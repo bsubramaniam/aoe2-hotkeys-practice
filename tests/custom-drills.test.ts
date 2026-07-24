@@ -15,7 +15,7 @@ class MemoryStorage implements Storage {
 
 function validDrillFile(): Record<string, unknown> {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     name: "Mining Camp Practice",
     description: "Practice placing a mining camp.",
     totalTimeMs: 60_000,
@@ -26,7 +26,7 @@ function validDrillFile(): Record<string, unknown> {
       sequence: [
         { type: "hotkey", action: "open_economic_buildings", onFailure: "wait", tip: "Open the build menu." },
         { type: "hotkey", action: "build_mining_camp", onFailure: "restart_sequence" },
-        { type: "click", zone: 8, onFailure: "wait" },
+        { type: "click", onFailure: "wait" },
       ],
     }],
   };
@@ -49,12 +49,11 @@ describe("custom drill files", () => {
       .toThrow("id is not supported");
   });
 
-  it("ignores obsolete per-drill click-zone layout data", () => {
+  it("rejects obsolete per-drill click-zone layout data", () => {
     const file = validDrillFile();
     file.clickZones = [{ id: 99, xPercent: -1, yPercent: 400 }];
 
-    expect(() => parseCustomDrill(file)).not.toThrow();
-    expect(drillToCustomFile(parseCustomDrill(file))).not.toHaveProperty("clickZones");
+    expect(() => parseCustomDrill(file)).toThrow("clickZones is not supported");
   });
 
   it("rejects unsupported logical hotkey actions", () => {
@@ -71,7 +70,7 @@ describe("custom drill files", () => {
     const drill = parseCustomDrill(validDrillFile());
     const serialized = drillToCustomFile(drill);
 
-    expect(serialized.schemaVersion).toBe(1);
+    expect(serialized.schemaVersion).toBe(2);
     expect(serialized).not.toHaveProperty("id");
     expect(serialized.sequences[0]?.sequence).toHaveLength(3);
     expect(() => parseCustomDrill(serialized)).not.toThrow();
@@ -83,8 +82,8 @@ describe("custom drill files", () => {
     const sequence = (file.sequences as Array<Record<string, unknown>>)[0];
     if (!sequence) throw new Error("Fixture sequence is missing.");
     sequence.sequence = [
-      { type: "click", zone: 4, onFailure: "wait", tip: "   " },
-      { type: "click", zone: 5, onFailure: "wait", tip: "Use the center." },
+      { type: "click", onFailure: "wait", tip: "   " },
+      { type: "click", onFailure: "wait", tip: "Use the center." },
     ];
 
     const parsed = parseCustomDrill(file);
@@ -97,18 +96,18 @@ describe("custom drill files", () => {
       sequences: [{
         ...parsed.sequences[0]!,
         steps: [
-          { type: "click", zone: "random", label: "Random", onFailure: "wait", tip: "Anywhere" },
-          { type: "click", zone: 5, label: "Five", onFailure: "wait" },
+          { type: "click", label: "Anywhere", onFailure: "wait", tip: "Anywhere" },
+          { type: "click", label: "Anywhere", onFailure: "wait" },
         ],
       }],
     });
     expect(serialized.sequences[0]?.sequence).toEqual([
-      { type: "click", zone: 1, onFailure: "wait", tip: "Anywhere" },
-      { type: "click", zone: 5, onFailure: "wait" },
+      { type: "click", onFailure: "wait", tip: "Anywhere" },
+      { type: "click", onFailure: "wait" },
     ]);
 
     const storage = new MemoryStorage();
-    storage.setItem("aoe2-hotkey-practice.custom-drills.v1", JSON.stringify([null, { ...validDrillFile(), id: "valid" }]));
+    storage.setItem("aoe2-hotkey-practice.custom-drills.v2", JSON.stringify([null, { ...validDrillFile(), id: "valid" }]));
     expect(loadCustomDrills(storage).drills).toHaveLength(1);
   });
 
@@ -164,15 +163,15 @@ describe("custom drill files", () => {
     expect(loadCustomDrills(new MemoryStorage())).toEqual({ drills: [], storageAvailable: true });
 
     const malformed = new MemoryStorage();
-    malformed.setItem("aoe2-hotkey-practice.custom-drills.v1", "not json");
+    malformed.setItem("aoe2-hotkey-practice.custom-drills.v2", "not json");
     expect(loadCustomDrills(malformed)).toEqual({ drills: [], storageAvailable: false });
 
     const nonArray = new MemoryStorage();
-    nonArray.setItem("aoe2-hotkey-practice.custom-drills.v1", "{}");
+    nonArray.setItem("aoe2-hotkey-practice.custom-drills.v2", "{}");
     expect(loadCustomDrills(nonArray)).toEqual({ drills: [], storageAvailable: true });
 
     const mixed = new MemoryStorage();
-    mixed.setItem("aoe2-hotkey-practice.custom-drills.v1", JSON.stringify([{}, { ...validDrillFile(), id: "stored-id" }]));
+    mixed.setItem("aoe2-hotkey-practice.custom-drills.v2", JSON.stringify([{}, { ...validDrillFile(), id: "stored-id" }]));
     expect(loadCustomDrills(mixed).drills).toHaveLength(1);
     expect(persistCustomDrills([], undefined)).toBe(false);
 
@@ -188,7 +187,8 @@ describe("custom drill files", () => {
     const cases: Array<[unknown, string]> = [
       [null, "JSON object"],
       [{}, "schemaVersion"],
-      [{ schemaVersion: 1, totalTimeMs: 0 }, "positive integer"],
+      [{ ...validDrillFile(), schemaVersion: 1 }, "schemaVersion must be 2"],
+      [{ schemaVersion: 2, totalTimeMs: 0 }, "positive integer"],
       [{ ...validDrillFile(), sequences: [] }, "at least one sequence"],
       [{ ...validDrillFile(), sequences: [null] }, "must be an object"],
     ];
@@ -205,9 +205,9 @@ describe("custom drill files", () => {
     expect(() => parseCustomDrill(mutateSequence({ targetTimeMs: [1, 1, 1, 1, 1, 1, 0] }))).toThrow("positive integer");
     expect(() => parseCustomDrill(mutateSequence({ sequence: [] }))).toThrow("at least one step");
     expect(() => parseCustomDrill(mutateSequence({ sequence: [null] }))).toThrow("must be an object");
-    expect(() => parseCustomDrill(mutateSequence({ sequence: [{ type: "click", zone: 1, onFailure: "stop" }] }))).toThrow("onFailure");
-    expect(() => parseCustomDrill(mutateSequence({ sequence: [{ type: "click", zone: 1, onFailure: "wait", tip: 4 }] }))).toThrow("tip");
-    expect(() => parseCustomDrill(mutateSequence({ sequence: [{ type: "click", zone: 21, onFailure: "wait" }] }))).toThrow("1 through 20");
+    expect(() => parseCustomDrill(mutateSequence({ sequence: [{ type: "click", onFailure: "stop" }] }))).toThrow("onFailure");
+    expect(() => parseCustomDrill(mutateSequence({ sequence: [{ type: "click", onFailure: "wait", tip: 4 }] }))).toThrow("tip");
+    expect(() => parseCustomDrill(mutateSequence({ sequence: [{ type: "click", zone: 1, onFailure: "wait" }] }))).toThrow("zone is not supported");
     expect(() => parseCustomDrill(mutateSequence({ sequence: [{ type: "other", onFailure: "wait" }] }))).toThrow("type");
     expect(() => parseCustomDrill(mutateSequence({ id: "" }))).toThrow("non-empty string");
 

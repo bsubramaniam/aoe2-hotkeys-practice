@@ -1,4 +1,5 @@
 import type { Drill, HotkeyStep, SequenceTemplate } from "./types";
+import { BUILTIN_COMMAND_PANELS } from "./builtin-command-panels";
 import { getHotkeyAction, type HotkeyActionDefinition } from "./hotkey-actions";
 
 interface BuildingDefinition {
@@ -32,6 +33,7 @@ const buildings: BuildingDefinition[] = [
 ];
 
 const TARGET_TIMES = [6500, 5200, 4200, 3300, 2600, 2000, 1500] as const;
+const COMMAND_TARGET_TIMES = [3500, 2800, 2200, 1800, 1400, 1100, 850] as const;
 const VILLAGER_SELECTION_SEQUENCE_COUNT = 4;
 
 export function hotkeyStep(action: string, onFailure: HotkeyStep["onFailure"]): HotkeyStep {
@@ -53,22 +55,57 @@ const sequences: SequenceTemplate[] = buildings.map((building, index) => ({
     hotkeyStep(`build_${building.id}`, "restart_sequence"),
     {
       type: "click",
-      zone: "random",
-      label: "Place building",
+      label: "Left click anywhere",
       onFailure: "wait",
     },
   ],
   targetTimeMs: TARGET_TIMES,
 }));
 
+const quickWallSequences: SequenceTemplate[] = Array.from({ length: 10 }, (_, index) => {
+  const stone = index % 2 === 1;
+  const wallName = stone ? "Stone Wall" : "Palisade Wall";
+  return {
+    id: `quick-wall-${index + 1}`,
+    name: `${wallName} ${Math.floor(index / 2) + 1} of 5`,
+    steps: [
+      hotkeyStep("open_military_buildings", "wait"),
+      hotkeyStep(stone ? "build_stone_wall" : "build_palisade_wall", "restart_sequence"),
+      { type: "click", label: "Place wall", onFailure: "wait" },
+    ],
+    targetTimeMs: TARGET_TIMES,
+  };
+});
+
+const commandDrills: Drill[] = BUILTIN_COMMAND_PANELS.map((panel) => ({
+  id: panel.drillId,
+  name: panel.name,
+  description: panel.description,
+  totalTimeMs: panel.entries.length * 4000,
+  sequences: panel.entries.map((panelEntry) => ({
+    id: `${panel.id}-${panelEntry.action.replaceAll("_", "-")}`,
+    name: panelEntry.label,
+    steps: [{ ...hotkeyStep(panelEntry.action, "restart_sequence"), label: panelEntry.label }],
+    targetTimeMs: COMMAND_TARGET_TIMES,
+  })),
+}));
+
 export const BUILTIN_DRILLS: Drill[] = [
   {
     id: "villager-building-placement",
     name: "Villager Building Placement",
-    description: "Open the correct build menu, choose the requested building, then place it in the marked zone.",
+    description: "Open the correct build menu, choose the requested building, then confirm it with a left click.",
     totalTimeMs: 137_000,
     sequences,
   },
+  {
+    id: "quick-walling",
+    name: "Quick Walling",
+    description: "Repeat Palisade and Stone Wall hotkeys, then confirm each placement with one click.",
+    totalTimeMs: 65_000,
+    sequences: quickWallSequences,
+  },
+  ...commandDrills,
 ];
 
 export function getRequiredActions(drill: Drill): HotkeyActionDefinition[] {

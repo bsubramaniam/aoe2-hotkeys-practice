@@ -1,7 +1,7 @@
 import { getHotkeyAction } from "./hotkey-actions";
 import type { Drill, FailureHandling, SequenceTemplate } from "./types";
 
-export const CUSTOM_DRILL_STORAGE_KEY = "aoe2-hotkey-practice.custom-drills.v1";
+export const CUSTOM_DRILL_STORAGE_KEY = "aoe2-hotkey-practice.custom-drills.v2";
 
 interface CustomHotkeyStepFile {
   type: "hotkey";
@@ -12,7 +12,6 @@ interface CustomHotkeyStepFile {
 
 interface CustomClickStepFile {
   type: "click";
-  zone: number;
   tip?: string;
   onFailure: FailureHandling;
 }
@@ -27,7 +26,7 @@ export interface CustomSequenceFile {
 }
 
 export interface CustomDrillFile {
-  schemaVersion: 1;
+  schemaVersion: 2;
   name: string;
   description: string;
   totalTimeMs: number;
@@ -116,9 +115,8 @@ function parseSequence(value: unknown, index: number): SequenceTemplate {
       return { type: "hotkey" as const, action, label: definition.label, onFailure, ...(tip ? { tip } : {}) };
     }
     if (step.type === "click") {
-      const zone = positiveInteger(step.zone, `${stepPath}.zone`);
-      if (zone > 20) throw new Error(`${stepPath}.zone must be from 1 through 20.`);
-      return { type: "click" as const, zone, label: `Click zone ${zone}`, onFailure, ...(tip ? { tip } : {}) };
+      if (step.zone !== undefined) throw new Error(`${stepPath}.zone is not supported.`);
+      return { type: "click" as const, label: "Left click anywhere", onFailure, ...(tip ? { tip } : {}) };
     }
     throw new Error(`${stepPath}.type must be "hotkey" or "click".`);
   });
@@ -133,7 +131,8 @@ function parseSequence(value: unknown, index: number): SequenceTemplate {
 export function parseCustomDrill(value: unknown): Drill {
   if (!isRecord(value)) throw new Error("The drill file must contain a JSON object.");
   if (value.id !== undefined) throw new Error("id is not supported in custom drill files.");
-  if (value.schemaVersion !== 1) throw new Error("schemaVersion must be 1.");
+  if (value.clickZones !== undefined) throw new Error("clickZones is not supported in custom drill files.");
+  if (value.schemaVersion !== 2) throw new Error("schemaVersion must be 2.");
   const totalTimeMs = positiveInteger(value.totalTimeMs, "totalTimeMs");
   if (!Array.isArray(value.sequences) || value.sequences.length === 0) {
     throw new Error("sequences must contain at least one sequence.");
@@ -153,7 +152,7 @@ export function parseCustomDrill(value: unknown): Drill {
 
 export function drillToCustomFile(drill: Drill): CustomDrillFile {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     name: drill.name,
     description: drill.description,
     totalTimeMs: drill.totalTimeMs,
@@ -162,7 +161,7 @@ export function drillToCustomFile(drill: Drill): CustomDrillFile {
       name: sequence.name,
       sequence: sequence.steps.map((step) => step.type === "hotkey"
         ? { type: "hotkey", action: step.action, onFailure: step.onFailure, ...(step.tip ? { tip: step.tip } : {}) }
-        : { type: "click", zone: step.zone === "random" ? 1 : step.zone, onFailure: step.onFailure, ...(step.tip ? { tip: step.tip } : {}) }),
+        : { type: "click", onFailure: step.onFailure, ...(step.tip ? { tip: step.tip } : {}) }),
       targetTimeMs: [...sequence.targetTimeMs] as CustomSequenceFile["targetTimeMs"],
     })),
   };

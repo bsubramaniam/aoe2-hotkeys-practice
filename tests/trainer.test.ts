@@ -21,8 +21,8 @@ const drill: Drill = {
 
 describe("trainer session", () => {
   it("waits on the same step when wait handling fails", () => {
-    const session = createSession(drill, 2, 0, () => 0);
-    const failed = submitAttempt(session, false, 500, () => 0);
+    const session = createSession(drill, 2, 0);
+    const failed = submitAttempt(session, false, 500);
 
     expect(failed.stepIndex).toBe(0);
     expect(failed.totalTries).toBe(1);
@@ -30,19 +30,19 @@ describe("trainer session", () => {
   });
 
   it("restarts the sequence after a restart_sequence failure", () => {
-    let session = createSession(drill, 2, 0, () => 0);
-    session = submitAttempt(session, true, 300, () => 0);
+    let session = createSession(drill, 2, 0);
+    session = submitAttempt(session, true, 300);
     expect(session.stepIndex).toBe(1);
 
-    session = submitAttempt(session, false, 700, () => 0);
+    session = submitAttempt(session, false, 700);
     expect(session.stepIndex).toBe(0);
     expect(session.totalTries).toBe(2);
   });
 
   it("records sequence time against the selected target", () => {
-    let session = createSession(drill, 2, 0, () => 0);
-    session = submitAttempt(session, true, 500, () => 0);
-    session = submitAttempt(session, true, 2_500, () => 0);
+    let session = createSession(drill, 2, 0);
+    session = submitAttempt(session, true, 500);
+    session = submitAttempt(session, true, 2_500);
 
     expect(session.results).toHaveLength(1);
     expect(session.results[0]).toMatchObject({ elapsedMs: 2_500, targetMs: 3_000, metTarget: true });
@@ -59,23 +59,23 @@ describe("trainer session", () => {
         { ...drill.sequences[0]!, id: "second", name: "Second" },
       ],
     };
-    let session = createSession(orderedDrill, 2, 0, () => 0.99);
+    let session = createSession(orderedDrill, 2, 0);
     expect(session.currentSequence.id).toBe("first");
 
-    session = submitAttempt(session, true, 100, () => 0.99);
-    session = submitAttempt(session, true, 200, () => 0.99);
+    session = submitAttempt(session, true, 100);
+    session = submitAttempt(session, true, 200);
     expect(session.currentSequence.id).toBe("second");
     expect(session.status).toBe("running");
 
-    session = submitAttempt(session, true, 300, () => 0.99);
-    session = submitAttempt(session, true, 400, () => 0.99);
+    session = submitAttempt(session, true, 300);
+    session = submitAttempt(session, true, 400);
     expect(session.status).toBe("finished");
     expect(session.finishReason).toBe("complete");
     expect(session.results.map((result) => result.id)).toEqual(["first", "second"]);
   });
 
   it("excludes paused time from drill and sequence timers", () => {
-    let session = createSession(drill, 2, 0, () => 0);
+    let session = createSession(drill, 2, 0);
     session = togglePause(session, 1_000);
     session = togglePause(session, 4_000);
 
@@ -84,7 +84,7 @@ describe("trainer session", () => {
     expect(tickSession(session, 13_000).status).toBe("finished");
   });
 
-  it("covers finished, idle, invalid, and random-zone session branches", () => {
+  it("covers finished, idle, invalid, and click-label normalization branches", () => {
     expect(() => createSession({ ...drill, sequences: [] }, 0, 0)).toThrow("at least one sequence");
 
     const session = createSession(drill, 0, 0);
@@ -101,13 +101,17 @@ describe("trainer session", () => {
     expect(submitAttempt(noStep, true, 1)).toBe(noStep);
     expect(() => submitAttempt({ ...session, difficultyIndex: 99, stepIndex: 1 }, true, 1)).toThrow("no target time");
 
-    const randomDrill: Drill = {
+    const clickDrill: Drill = {
       ...drill,
       sequences: [{
         ...drill.sequences[0]!,
-        steps: [{ type: "click", zone: "random", label: "Random", onFailure: "wait" }],
+        steps: [{ type: "click", label: "Confirm", onFailure: "wait" }],
       }],
     };
-    expect(createSession(randomDrill, 0, 0, () => 0.99).currentSequence.steps[0]).toMatchObject({ zone: 20 });
+    expect(createSession(clickDrill, 0, 0).currentSequence.steps[0]).toEqual({
+      type: "click",
+      label: "Left click anywhere",
+      onFailure: "wait",
+    });
   });
 });

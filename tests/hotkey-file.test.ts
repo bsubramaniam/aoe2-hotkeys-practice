@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { deflateSync } from "fflate";
 
-import { bindingSignature, eventMatchesBinding, formatBinding, isModifierOnly, MAX_DECOMPRESSED_HOTKEY_BYTES, MAX_HOTKEY_FILE_BYTES, parseHotkeyFiles } from "../src/hotkey-file";
+import { bindingSignature, eventMatchesBinding, formatBinding, isModifierOnly, isWheelBinding, MAX_DECOMPRESSED_HOTKEY_BYTES, MAX_HOTKEY_FILE_BYTES, parseHotkeyFiles, wheelEventMatchesBinding } from "../src/hotkey-file";
 
 interface FixtureHotkey {
   keyCode: number;
@@ -9,6 +9,7 @@ interface FixtureHotkey {
   ctrl?: boolean;
   alt?: boolean;
   shift?: boolean;
+  mouse?: boolean;
 }
 
 function makeMenu(hotkeys: FixtureHotkey[]): Uint8Array {
@@ -22,7 +23,7 @@ function makeMenu(hotkeys: FixtureHotkey[]): Uint8Array {
     view.setUint8(offset + 8, hotkey.ctrl ? 1 : 0);
     view.setUint8(offset + 9, hotkey.alt ? 1 : 0);
     view.setUint8(offset + 10, hotkey.shift ? 1 : 0);
-    view.setUint8(offset + 11, 0);
+    view.setUint8(offset + 11, hotkey.mouse ? 1 : 0);
   });
   return new Uint8Array(buffer);
 }
@@ -183,6 +184,34 @@ describe("hotkey file parser", () => {
     expect(profile.bindings.get(3)?.[0]?.key).toBe("F1");
     expect(profile.bindings.get(4)?.[0]?.key).toBe("F12");
     expect(formatBinding({ key: "A", ctrl: false, alt: true, shift: false })).toBe("Alt + A");
+  });
+
+  it("decodes and matches mouse-wheel Gate rotation bindings", () => {
+    const file = combine([
+      uint32(0),
+      uint32(1),
+      makeMenu([
+        { keyCode: 255, stringId: 19331, ctrl: true, mouse: true },
+        { keyCode: 254, stringId: 19332, shift: true, mouse: true },
+      ]),
+    ]);
+    const profile = parseHotkeyFiles([{ name: "gate-wheel.hki", buffer: file }]);
+    const clockwise = profile.bindings.get(19331)?.[0];
+    const counterclockwise = profile.bindings.get(19332)?.[0];
+
+    expect(clockwise).toMatchObject({ key: "WheelUp", ctrl: false, alt: false, shift: false });
+    expect(counterclockwise).toMatchObject({ key: "WheelDown", ctrl: false, alt: false, shift: false });
+    expect(clockwise && isWheelBinding(clockwise)).toBe(true);
+    const wheel = (deltaY: number): WheelEvent => ({
+      deltaY,
+      ctrlKey: false,
+      altKey: false,
+      shiftKey: false,
+    }) as WheelEvent;
+    expect(wheelEventMatchesBinding(wheel(-1), clockwise!)).toBe(true);
+    expect(wheelEventMatchesBinding(wheel(1), clockwise!)).toBe(false);
+    expect(wheelEventMatchesBinding(wheel(0), clockwise!)).toBe(false);
+    expect(isWheelBinding({ key: "Q", ctrl: false, alt: false, shift: false })).toBe(false);
   });
 
   it("deduplicates identical bindings across files", () => {

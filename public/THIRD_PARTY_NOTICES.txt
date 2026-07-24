@@ -1,7 +1,24 @@
 Third-Party Notices
 ===================
 
-This software includes the following third-party component:
+Microsoft game content
+----------------------
+
+The files under assets/microsoft-game-content/ are cropped from screenshots
+captured during normal gameplay. They are not licensed under the project's MIT
+License. Their use is governed by Microsoft's Game Content Usage Rules:
+https://www.xbox.com/en-us/developers/rules
+
+Anyone who copies, modifies, or redistributes those files must comply with
+Microsoft's rules or remove and replace the files.
+
+Age of Empires II: Definitive Edition © Microsoft Corporation. AoE II Hotkey
+Practice was created under Microsoft's "Game Content Usage Rules" using assets
+from Age of Empires II: Definitive Edition, and it is not endorsed by or
+affiliated with Microsoft.
+
+fflate
+------
 
 fflate 0.8.3
 https://github.com/101arrowz/fflate

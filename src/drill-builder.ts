@@ -58,11 +58,10 @@ export function mountDrillBuilder(root: HTMLElement, options: BuilderOptions): v
     name: sequence.name,
     steps: sequence.steps.map((step): Step => step.type === "hotkey"
       ? { ...step }
-      : { ...step, zone: step.zone === "random" ? 1 : step.zone }),
+      : { ...step, label: "Left click anywhere" }),
     targetTimeMs: [...sequence.targetTimeMs],
   })) ?? [newSequence(1)];
   let sequenceIndex = 0;
-  let expandedClickStep: number | null = null;
   let modalOpen = false;
   let modalLoading = false;
   let preparedActions: Array<HotkeyActionDefinition & { binding: string; searchText: string }> | null = null;
@@ -75,21 +74,6 @@ export function mountDrillBuilder(root: HTMLElement, options: BuilderOptions): v
     return sequence;
   }
 
-  function renderClickPicker(step: Extract<Step, { type: "click" }>, index: number): HTMLElement {
-    const picker = element("div", { className: "click-step-picker" });
-    picker.append(element("p", { text: "Select the required click zone:" }));
-    const grid = element("div", { className: "click-step-picker__grid" });
-    for (let zone = 1; zone <= 20; zone += 1) {
-      const choice = button(String(zone), `zone-choice${zone === step.zone ? " zone-choice--selected" : ""}`);
-      choice.dataset.selectStepZone = String(zone);
-      choice.dataset.stepIndex = String(index);
-      choice.setAttribute("aria-pressed", String(zone === step.zone));
-      grid.append(choice);
-    }
-    picker.append(grid);
-    return picker;
-  }
-
   function renderStep(step: Step, index: number): HTMLElement {
     const article = element("article", { className: "builder-step" });
     const summary = element("div", { className: "builder-step__summary" });
@@ -98,20 +82,17 @@ export function mountDrillBuilder(root: HTMLElement, options: BuilderOptions): v
     const stepLabel = button("", "builder-step__label");
     stepLabel.append(
       element("strong", { text: step.label }),
-      element("small", { text: step.type === "hotkey" ? "Hotkey action" : "Click action" }),
+      element("small", { text: step.type === "hotkey" ? "Hotkey action" : "Left-click action" }),
     );
-    if (step.type === "click") stepLabel.dataset.expandClick = String(index);
     summary.append(stepLabel);
 
-    const detail = step.type === "hotkey" ? options.bindingForAction(step.action) : `Zone ${step.zone}`;
+    const detail = step.type === "hotkey" ? options.bindingForAction(step.action) : "Left click";
     summary.append(element("kbd", { text: detail }));
     const remove = button("×", "icon-button");
     remove.dataset.deleteStep = String(index);
     remove.setAttribute("aria-label", `Delete step ${index + 1}`);
     summary.append(remove);
     article.append(summary);
-
-    if (step.type === "click" && expandedClickStep === index) article.append(renderClickPicker(step, index));
 
     const fields = element("div", { className: "builder-step__fields" });
     const tip = element("input");
@@ -278,12 +259,12 @@ export function mountDrillBuilder(root: HTMLElement, options: BuilderOptions): v
     editor.append(targetFieldset);
 
     const steps = element("div", { className: "builder-steps" });
-    if (sequence.steps.length === 0) steps.append(element("p", { className: "empty-state", text: "Add the first hotkey or click step for this sequence." }));
+    if (sequence.steps.length === 0) steps.append(element("p", { className: "empty-state", text: "Add the first hotkey or left-click step for this sequence." }));
     else sequence.steps.forEach((step, index) => steps.append(renderStep(step, index)));
     editor.append(steps);
 
     const addActions = element("div", { className: "add-step-actions" });
-    addActions.append(button("+ Add hotkey step", "button button--secondary", "add-hotkey-step"), button("+ Add click zone", "button button--secondary", "add-click-step"));
+    addActions.append(button("+ Add hotkey step", "button button--secondary", "add-hotkey-step"), button("+ Add left-click step", "button button--secondary", "add-click-step"));
     editor.append(addActions);
     const navigation = element("div", { className: "sequence-navigation" });
     const previous = button("← Prev sequence", "button button--text", "previous-sequence");
@@ -315,21 +296,16 @@ export function mountDrillBuilder(root: HTMLElement, options: BuilderOptions): v
     root.querySelectorAll<HTMLInputElement>("[data-target-time]").forEach((input) => input.addEventListener("input", () => { currentSequence().targetTimeMs[Number(input.dataset.targetTime)] = Number(input.value); }));
     root.querySelectorAll<HTMLInputElement>("[data-step-tip]").forEach((input) => input.addEventListener("input", () => { const step = currentSequence().steps[Number(input.dataset.stepTip)]; if (step) step.tip = input.value; }));
     root.querySelectorAll<HTMLSelectElement>("[data-step-failure]").forEach((select) => select.addEventListener("change", () => { const step = currentSequence().steps[Number(select.dataset.stepFailure)]; if (step) step.onFailure = select.value as FailureHandling; }));
-    root.querySelectorAll<HTMLButtonElement>("[data-delete-step]").forEach((item) => item.addEventListener("click", () => { currentSequence().steps.splice(Number(item.dataset.deleteStep), 1); expandedClickStep = null; render(); }));
-    root.querySelectorAll<HTMLButtonElement>("[data-expand-click]").forEach((item) => item.addEventListener("click", () => { const index = Number(item.dataset.expandClick); expandedClickStep = expandedClickStep === index ? null : index; render(); }));
-    root.querySelectorAll<HTMLButtonElement>("[data-select-step-zone]").forEach((item) => item.addEventListener("click", () => {
-      const step = currentSequence().steps[Number(item.dataset.stepIndex)];
-      if (step?.type === "click") { step.zone = Number(item.dataset.selectStepZone); step.label = `Click zone ${step.zone}`; expandedClickStep = null; render(); }
-    }));
+    root.querySelectorAll<HTMLButtonElement>("[data-delete-step]").forEach((item) => item.addEventListener("click", () => { currentSequence().steps.splice(Number(item.dataset.deleteStep), 1); render(); }));
     root.querySelector<HTMLButtonElement>("#add-hotkey-step")?.addEventListener("click", openHotkeyModal);
-    root.querySelector<HTMLButtonElement>("#add-click-step")?.addEventListener("click", () => { currentSequence().steps.push({ type: "click", zone: 1, label: "Click zone 1", onFailure: "wait" }); expandedClickStep = currentSequence().steps.length - 1; render(); });
+    root.querySelector<HTMLButtonElement>("#add-click-step")?.addEventListener("click", () => { currentSequence().steps.push({ type: "click", label: "Left click anywhere", onFailure: "wait" }); render(); });
     root.querySelector<HTMLInputElement>("#action-search")?.addEventListener("input", (event) => { searchQuery = (event.currentTarget as HTMLInputElement).value; render(); const input = root.querySelector<HTMLInputElement>("#action-search"); input?.focus(); input?.setSelectionRange(searchQuery.length, searchQuery.length); });
     root.querySelector<HTMLButtonElement>("#close-hotkey-modal")?.addEventListener("click", closeModal);
     root.querySelector<HTMLElement>("[data-modal-backdrop]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) closeModal(); });
     root.querySelectorAll<HTMLButtonElement>("[data-add-action]").forEach((item) => item.addEventListener("click", () => { const action = options.actions.find((candidate) => candidate.id === item.dataset.addAction); if (!action) return; currentSequence().steps.push({ type: "hotkey", action: action.id, label: action.label, onFailure: "wait" }); modalOpen = false; render(); }));
-    root.querySelector<HTMLButtonElement>("#previous-sequence")?.addEventListener("click", () => { sequenceIndex -= 1; expandedClickStep = null; render(); });
-    root.querySelector<HTMLButtonElement>("#next-sequence")?.addEventListener("click", () => { sequenceIndex += 1; expandedClickStep = null; render(); });
-    root.querySelector<HTMLButtonElement>("#add-sequence")?.addEventListener("click", () => { sequences.push(newSequence(sequences.length + 1)); sequenceIndex = sequences.length - 1; expandedClickStep = null; render(); });
+    root.querySelector<HTMLButtonElement>("#previous-sequence")?.addEventListener("click", () => { sequenceIndex -= 1; render(); });
+    root.querySelector<HTMLButtonElement>("#next-sequence")?.addEventListener("click", () => { sequenceIndex += 1; render(); });
+    root.querySelector<HTMLButtonElement>("#add-sequence")?.addEventListener("click", () => { sequences.push(newSequence(sequences.length + 1)); sequenceIndex = sequences.length - 1; render(); });
     root.querySelector<HTMLButtonElement>("#delete-sequence")?.addEventListener("click", () => { if (sequences.length === 1) return; sequences.splice(sequenceIndex, 1); sequenceIndex = Math.min(sequenceIndex, sequences.length - 1); render(); });
     root.querySelector<HTMLButtonElement>("#save-drill")?.addEventListener("click", save);
   }
