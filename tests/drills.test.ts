@@ -1,25 +1,30 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { CLICK_ZONES } from "../src/click-zones";
+import { BUILTIN_COMMAND_PANELS } from "../src/builtin-command-panels";
+import { commandPanelState } from "../src/command-panel";
 import { createDefaultProfile } from "../src/default-profile";
 import { BUILTIN_DRILLS, getRequiredActions, hotkeyStep } from "../src/drills";
 import { actionsForStringIds, getHotkeyAction, HOTKEY_ACTIONS } from "../src/hotkey-actions";
+import { getDrillTargetTimeMs } from "../src/trainer";
 
 describe("built-in drill", () => {
-  it("allows more total time than all sequences at the Easy target", () => {
+  it("calculates total time as the sum of sequence targets for each difficulty", () => {
     const drill = BUILTIN_DRILLS[0];
-    expect(drill?.totalTimeMs).toBe(137_000);
-    expect(drill!.totalTimeMs).toBeGreaterThan(
-      drill!.sequences.length * drill!.sequences[0]!.targetTimeMs[0],
+    expect(getDrillTargetTimeMs(drill!, 0)).toBe(
+      drill!.sequences.reduce((sum, sequence) => sum + sequence.targetTimeMs[0], 0),
+    );
+    expect(getDrillTargetTimeMs(drill!, 6)).toBe(
+      drill!.sequences.reduce((sum, sequence) => sum + sequence.targetTimeMs[6], 0),
     );
   });
 
-  it("shows all twenty numbered click zones", () => {
-    expect(CLICK_ZONES).toHaveLength(20);
-    expect(CLICK_ZONES.map((zone) => zone.id)).toEqual(
-      Array.from({ length: 20 }, (_, index) => index + 1),
-    );
+  it("ends every building-placement sequence with a left click anywhere", () => {
+    const placementSteps = BUILTIN_DRILLS[0]?.sequences.map((sequence) => sequence.steps.at(-1));
+    expect(placementSteps).toHaveLength(21);
+    expect(placementSteps?.every((step) =>
+      step?.type === "click" && step.label === "Left click anywhere"
+    )).toBe(true);
   });
 
   it("starts only the final four building sequences by selecting a villager", () => {
@@ -42,10 +47,79 @@ describe("built-in drill", () => {
     )).toBe(true);
   });
 
+  it("includes one permanent built-in drill for every captured building and unit panel", () => {
+    expect(BUILTIN_DRILLS).toHaveLength(2 + BUILTIN_COMMAND_PANELS.length);
+    expect(BUILTIN_COMMAND_PANELS).toHaveLength(22);
+    expect(BUILTIN_DRILLS.slice(2).map((drill) => drill.id)).toEqual(
+      BUILTIN_COMMAND_PANELS.map((panel) => panel.drillId),
+    );
+
+    for (const [index, panel] of BUILTIN_COMMAND_PANELS.entries()) {
+      const drill = BUILTIN_DRILLS[index + 2];
+      expect(drill).toMatchObject({
+        description: panel.description,
+        id: panel.drillId,
+        name: panel.name,
+      });
+      expect(drill?.sequences.map((sequence) => sequence.steps[0])).toEqual(
+        panel.entries.map((entry) => ({
+          action: entry.action,
+          label: entry.label,
+          type: "hotkey",
+        })),
+      );
+      for (const sequence of drill?.sequences ?? []) {
+        expect(commandPanelState({ ...sequence, steps: [...sequence.steps] }, 0)?.menu)
+          .toBe(panel.id);
+      }
+      expect(getDrillTargetTimeMs(drill!, 0)).toBe(
+        drill!.sequences.reduce((sum, sequence) => sum + sequence.targetTimeMs[0], 0),
+      );
+    }
+  });
+
+  it("repeats Palisade and Stone Wall placement five times each", () => {
+    const drill = BUILTIN_DRILLS.find((candidate) => candidate.id === "quick-walling");
+    expect(drill).toMatchObject({
+      name: "Quick Walling",
+    });
+    expect(drill?.sequences).toHaveLength(10);
+    expect(drill?.sequences.filter((sequence) => sequence.name.startsWith("Palisade Wall"))).toHaveLength(5);
+    expect(drill?.sequences.filter((sequence) => sequence.name.startsWith("Stone Wall"))).toHaveLength(5);
+    for (const sequence of drill?.sequences ?? []) {
+      expect(sequence.steps.map((step) => step.type)).toEqual(["hotkey", "hotkey", "click"]);
+      expect(sequence.steps.at(-1)?.label).toBe("Place wall");
+    }
+  });
+
+  it("maps every captured command-panel action in the default profile", () => {
+    const profile = createDefaultProfile();
+    const actions = new Set(
+      BUILTIN_COMMAND_PANELS.flatMap((panel) => panel.entries.map((entry) => entry.action)),
+    );
+
+    for (const action of actions) {
+      const definition = getHotkeyAction(action);
+      expect(definition, action).toBeDefined();
+      expect(profile.bindings.get(definition!.stringId), action).toBeDefined();
+    }
+  });
+
   it("provides the complete named action catalogue and common selection actions", () => {
     expect(HOTKEY_ACTIONS.size).toBeGreaterThanOrEqual(500);
     expect(getHotkeyAction("select_all_stables")).toMatchObject({ stringId: 19016 });
     expect(getHotkeyAction("select_all_town_centers")).toMatchObject({ stringId: 19021 });
+  });
+
+  it("gives every searchable action a unique context-aware label", () => {
+    const actions = [...HOTKEY_ACTIONS.values()];
+    const normalizedLabels = actions.map((action) => action.label.trim().toLowerCase());
+
+    expect(new Set(normalizedLabels).size).toBe(normalizedLabels.length);
+    expect(getHotkeyAction("hotkey_19043")?.label).toBe("Skirmisher — Archery Range");
+    expect(getHotkeyAction("hotkey_19179")?.label).toBe("Skirmisher — Settlement");
+    expect(getHotkeyAction("hotkey_19087")?.label).toBe("Zoom In — Mouse wheel");
+    expect(getHotkeyAction("hotkey_19089")?.label).toBe("Zoom In — Keyboard");
   });
 
   it("supports dynamic numeric action IDs and rejects malformed IDs", () => {
@@ -67,21 +141,21 @@ describe("built-in drill", () => {
       id: "requirements",
       name: "Requirements",
       description: "Test",
-      totalTimeMs: 1000,
       sequences: [{
         id: "one",
         name: "One",
+        startingSelection: { type: "none" as const },
         targetTimeMs: [1, 1, 1, 1, 1, 1, 1] as const,
         steps: [
-          { type: "hotkey" as const, action: "select_villager", label: "Select", onFailure: "wait" as const },
-          { type: "hotkey" as const, action: "select_villager", label: "Select", onFailure: "wait" as const },
-          { type: "hotkey" as const, action: "invalid", label: "Invalid", onFailure: "wait" as const },
-          { type: "click" as const, zone: 1, label: "Click", onFailure: "wait" as const },
+          { type: "hotkey" as const, action: "select_villager", label: "Select" },
+          { type: "hotkey" as const, action: "select_villager", label: "Select" },
+          { type: "hotkey" as const, action: "invalid", label: "Invalid" },
+          { type: "click" as const, label: "Click" },
         ],
       }],
     };
     expect(getRequiredActions(drill).map((action) => action.id)).toEqual(["select_villager"]);
-    expect(() => hotkeyStep("invalid", "wait")).toThrow("Unknown hotkey action");
+    expect(() => hotkeyStep("invalid")).toThrow("Unknown hotkey action");
   });
 
   it("uses current installed-game labels for newer profile actions", () => {

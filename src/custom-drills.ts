@@ -1,20 +1,18 @@
 import { getHotkeyAction } from "./hotkey-actions";
-import type { Drill, FailureHandling, SequenceTemplate } from "./types";
+import { isBuildingSelectionId, isUnitSelectionId } from "./selection-context";
+import type { Drill, SequenceTemplate, StartingSelection } from "./types";
 
-export const CUSTOM_DRILL_STORAGE_KEY = "aoe2-hotkey-practice.custom-drills.v1";
+export const CUSTOM_DRILL_STORAGE_KEY = "aoe2-hotkey-practice.custom-drills.v2";
 
 interface CustomHotkeyStepFile {
   type: "hotkey";
   action: string;
   tip?: string;
-  onFailure: FailureHandling;
 }
 
 interface CustomClickStepFile {
   type: "click";
-  zone: number;
   tip?: string;
-  onFailure: FailureHandling;
 }
 
 type CustomStepFile = CustomHotkeyStepFile | CustomClickStepFile;
@@ -22,15 +20,15 @@ type CustomStepFile = CustomHotkeyStepFile | CustomClickStepFile;
 export interface CustomSequenceFile {
   id: string;
   name: string;
+  startingSelection: StartingSelection;
   sequence: CustomStepFile[];
   targetTimeMs: [number, number, number, number, number, number, number];
 }
 
 export interface CustomDrillFile {
-  schemaVersion: 1;
+  schemaVersion: 2;
   name: string;
   description: string;
-  totalTimeMs: number;
   sequences: CustomSequenceFile[];
 }
 
@@ -85,11 +83,21 @@ function positiveInteger(value: unknown, path: string): number {
   return value as number;
 }
 
-function failureHandling(value: unknown, path: string): FailureHandling {
-  if (value !== "wait" && value !== "restart_sequence") {
-    throw new Error(`${path} must be "wait" or "restart_sequence".`);
+function parseStartingSelection(value: unknown, path: string): StartingSelection {
+  if (!isRecord(value)) throw new Error(`${path} must be an object.`);
+  if (value.type === "none") {
+    if (value.id !== undefined) throw new Error(`${path}.id is not supported when type is "none".`);
+    return { type: "none" };
   }
-  return value;
+  if (value.type === "building") {
+    if (!isBuildingSelectionId(value.id)) throw new Error(`${path}.id is not a supported building.`);
+    return { type: "building", id: value.id };
+  }
+  if (value.type === "unit") {
+    if (!isUnitSelectionId(value.id)) throw new Error(`${path}.id is not a supported unit.`);
+    return { type: "unit", id: value.id };
+  }
+  throw new Error(`${path}.type must be "none", "building", or "unit".`);
 }
 
 function parseSequence(value: unknown, index: number): SequenceTemplate {
@@ -107,24 +115,24 @@ function parseSequence(value: unknown, index: number): SequenceTemplate {
   const steps = value.sequence.map((step, stepIndex) => {
     const stepPath = `${path}.sequence[${stepIndex}]`;
     if (!isRecord(step)) throw new Error(`${stepPath} must be an object.`);
-    const onFailure = failureHandling(step.onFailure, `${stepPath}.onFailure`);
+    if (step.onFailure !== undefined) throw new Error(`${stepPath}.onFailure is not supported.`);
     const tip = optionalText(step.tip, `${stepPath}.tip`);
     if (step.type === "hotkey") {
       const action = requiredText(step.action, `${stepPath}.action`);
       const definition = getHotkeyAction(action);
       if (!definition) throw new Error(`${stepPath}.action is not supported.`);
-      return { type: "hotkey" as const, action, label: definition.label, onFailure, ...(tip ? { tip } : {}) };
+      return { type: "hotkey" as const, action, label: definition.label, ...(tip ? { tip } : {}) };
     }
     if (step.type === "click") {
-      const zone = positiveInteger(step.zone, `${stepPath}.zone`);
-      if (zone > 20) throw new Error(`${stepPath}.zone must be from 1 through 20.`);
-      return { type: "click" as const, zone, label: `Click zone ${zone}`, onFailure, ...(tip ? { tip } : {}) };
+      if (step.zone !== undefined) throw new Error(`${stepPath}.zone is not supported.`);
+      return { type: "click" as const, label: "Left click anywhere", ...(tip ? { tip } : {}) };
     }
     throw new Error(`${stepPath}.type must be "hotkey" or "click".`);
   });
   return {
     id: requiredText(value.id, `${path}.id`),
     name: requiredText(value.name, `${path}.name`),
+    startingSelection: parseStartingSelection(value.startingSelection, `${path}.startingSelection`),
     steps,
     targetTimeMs,
   };
@@ -133,8 +141,11 @@ function parseSequence(value: unknown, index: number): SequenceTemplate {
 export function parseCustomDrill(value: unknown): Drill {
   if (!isRecord(value)) throw new Error("The drill file must contain a JSON object.");
   if (value.id !== undefined) throw new Error("id is not supported in custom drill files.");
-  if (value.schemaVersion !== 1) throw new Error("schemaVersion must be 1.");
-  const totalTimeMs = positiveInteger(value.totalTimeMs, "totalTimeMs");
+  if (value.clickZones !== undefined) throw new Error("clickZones is not supported in custom drill files.");
+  if (value.totalTimeMs !== undefined) {
+    throw new Error("totalTimeMs is not supported; drill time is calculated from sequence targets.");
+  }
+  if (value.schemaVersion !== 2) throw new Error("schemaVersion must be 2.");
   if (!Array.isArray(value.sequences) || value.sequences.length === 0) {
     throw new Error("sequences must contain at least one sequence.");
   }
@@ -146,23 +157,22 @@ export function parseCustomDrill(value: unknown): Drill {
     id: friendlyCustomDrillId(name),
     name,
     description: optionalText(value.description, "description") ?? "Custom drill",
-    totalTimeMs,
     sequences,
   };
 }
 
 export function drillToCustomFile(drill: Drill): CustomDrillFile {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     name: drill.name,
     description: drill.description,
-    totalTimeMs: drill.totalTimeMs,
     sequences: drill.sequences.map((sequence) => ({
       id: sequence.id,
       name: sequence.name,
+      startingSelection: { ...sequence.startingSelection },
       sequence: sequence.steps.map((step) => step.type === "hotkey"
-        ? { type: "hotkey", action: step.action, onFailure: step.onFailure, ...(step.tip ? { tip: step.tip } : {}) }
-        : { type: "click", zone: step.zone === "random" ? 1 : step.zone, onFailure: step.onFailure, ...(step.tip ? { tip: step.tip } : {}) }),
+        ? { type: "hotkey", action: step.action, ...(step.tip ? { tip: step.tip } : {}) }
+        : { type: "click", ...(step.tip ? { tip: step.tip } : {}) }),
       targetTimeMs: [...sequence.targetTimeMs] as CustomSequenceFile["targetTimeMs"],
     })),
   };

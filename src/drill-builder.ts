@@ -1,11 +1,18 @@
 import type { HotkeyActionDefinition } from "./hotkey-actions";
-import { DIFFICULTIES, type Drill, type FailureHandling, type Step } from "./types";
+import {
+  BUILDING_SELECTION_OPTIONS,
+  startingSelectionKey,
+  UNIT_SELECTION_OPTIONS,
+} from "./selection-context";
+import type { Drill, StartingSelection, Step } from "./types";
 
 interface DraftSequence {
   id: string;
   name: string;
+  startingSelection: StartingSelection;
+  startingSelectionText: string;
   steps: Step[];
-  targetTimeMs: [number, number, number, number, number, number, number];
+  proTargetMs: number;
 }
 
 interface BuilderOptions {
@@ -17,8 +24,35 @@ interface BuilderOptions {
   onSave: (drill: Drill) => void;
 }
 
-const DEFAULT_TARGETS: DraftSequence["targetTimeMs"] = [6500, 5200, 4200, 3300, 2600, 2000, 1500];
-const MAX_VISIBLE_ACTIONS = 50;
+interface PreparedAction {
+  id: string;
+  label: string;
+  binding: string;
+  searchText: string;
+  type: "hotkey" | "click";
+}
+
+const DEFAULT_PRO_TARGET_MS = 1500;
+const TARGET_MULTIPLIERS = [4, 3, 2.5, 2, 1.5, 1.25, 1] as const;
+const MAX_VISIBLE_ACTIONS = 8;
+const LEFT_CLICK_CHOICE_ID = "__left_click__";
+const STARTING_SELECTION_CHOICES: Array<{
+  group: "Building" | "Unit" | "General";
+  label: string;
+  selection: StartingSelection;
+}> = [
+  { group: "General", label: "Nothing selected", selection: { type: "none" } },
+  ...BUILDING_SELECTION_OPTIONS.map((option) => ({ group: "Building" as const, ...option })),
+  ...UNIT_SELECTION_OPTIONS.map((option) => ({ group: "Unit" as const, ...option })),
+];
+
+export function targetTimesFromPro(
+  proTargetMs: number,
+): [number, number, number, number, number, number, number] {
+  return TARGET_MULTIPLIERS.map((multiplier) =>
+    Math.max(50, Math.round((proTargetMs * multiplier) / 50) * 50)
+  ) as [number, number, number, number, number, number, number];
+}
 
 function element<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -37,14 +71,49 @@ function button(text: string, className: string, id?: string): HTMLButtonElement
   return result;
 }
 
-function labelledControl(text: string, control: HTMLElement): HTMLLabelElement {
+function selectedAtStartLabel(selection: StartingSelection): string {
+  return STARTING_SELECTION_CHOICES.find((choice) =>
+    startingSelectionKey(choice.selection) === startingSelectionKey(selection)
+  )?.label ?? "Nothing selected";
+}
+
+function fieldLabel(text: string, forId: string, explanation: string): HTMLDivElement {
+  const wrap = element("div", { className: "field-label" });
   const label = element("label", { text });
-  label.append(control);
-  return label;
+  label.htmlFor = forId;
+  const info = element("span", { className: "field-info" });
+  const trigger = button("i", "field-info__button");
+  trigger.tabIndex = -1;
+  const tooltipId = `${forId}-help`;
+  trigger.setAttribute("aria-label", `About ${text}`);
+  trigger.setAttribute("aria-describedby", tooltipId);
+  const tooltip = element("span", {
+    className: "field-info__tooltip",
+    id: tooltipId,
+    text: explanation,
+  });
+  tooltip.setAttribute("role", "tooltip");
+  info.append(trigger, tooltip);
+  wrap.append(label, info);
+  return wrap;
 }
 
 function newSequence(number: number): DraftSequence {
-  return { id: `sequence-${number}`, name: "", steps: [], targetTimeMs: [...DEFAULT_TARGETS] };
+  return {
+    id: `sequence-${number}`,
+    name: "",
+    startingSelection: { type: "none" },
+    startingSelectionText: "Nothing selected",
+    steps: [],
+    proTargetMs: DEFAULT_PRO_TARGET_MS,
+  };
+}
+
+function nextSequenceNumber(sequences: readonly DraftSequence[]): number {
+  const ids = new Set(sequences.map((sequence) => sequence.id));
+  let number = 1;
+  while (ids.has(`sequence-${number}`)) number += 1;
+  return number;
 }
 
 export function mountDrillBuilder(root: HTMLElement, options: BuilderOptions): void {
@@ -52,22 +121,45 @@ export function mountDrillBuilder(root: HTMLElement, options: BuilderOptions): v
   const draftId = initial?.id ?? `custom-${Date.now()}`;
   let name = initial?.name ?? "";
   let description = initial?.description ?? "";
-  let totalTimeMs = initial?.totalTimeMs ?? 60_000;
   let sequences: DraftSequence[] = initial?.sequences.map((sequence) => ({
     id: sequence.id,
     name: sequence.name,
+    startingSelection: { ...sequence.startingSelection },
+    startingSelectionText: selectedAtStartLabel(sequence.startingSelection),
     steps: sequence.steps.map((step): Step => step.type === "hotkey"
       ? { ...step }
-      : { ...step, zone: step.zone === "random" ? 1 : step.zone }),
-    targetTimeMs: [...sequence.targetTimeMs],
+      : { ...step, label: "Left click anywhere" }),
+    proTargetMs: sequence.targetTimeMs[6],
   })) ?? [newSequence(1)];
   let sequenceIndex = 0;
-  let expandedClickStep: number | null = null;
-  let modalOpen = false;
-  let modalLoading = false;
-  let preparedActions: Array<HotkeyActionDefinition & { binding: string; searchText: string }> | null = null;
   let searchQuery = "";
+  let stepActiveIndex = 0;
+  let selectionSearchOpen = false;
+  let selectionFiltering = false;
+  let selectionActiveIndex = 0;
+  let suppressSelectionOpenOnce = false;
+  let detailsExpanded = !initial;
   let errorMessage = "";
+
+  const preparedActions: PreparedAction[] = [
+    {
+      id: LEFT_CLICK_CHOICE_ID,
+      label: "Left click anywhere",
+      binding: "Left click",
+      searchText: "left click anywhere mouse",
+      type: "click",
+    },
+    ...options.actions.map((action) => {
+      const binding = options.bindingForAction(action.id);
+      return {
+        id: action.id,
+        label: action.label,
+        binding,
+        searchText: `${action.label} ${binding}`.toLowerCase(),
+        type: "hotkey" as const,
+      };
+    }),
+  ];
 
   function currentSequence(): DraftSequence {
     const sequence = sequences[sequenceIndex];
@@ -75,132 +167,120 @@ export function mountDrillBuilder(root: HTMLElement, options: BuilderOptions): v
     return sequence;
   }
 
-  function renderClickPicker(step: Extract<Step, { type: "click" }>, index: number): HTMLElement {
-    const picker = element("div", { className: "click-step-picker" });
-    picker.append(element("p", { text: "Select the required click zone:" }));
-    const grid = element("div", { className: "click-step-picker__grid" });
-    for (let zone = 1; zone <= 20; zone += 1) {
-      const choice = button(String(zone), `zone-choice${zone === step.zone ? " zone-choice--selected" : ""}`);
-      choice.dataset.selectStepZone = String(zone);
-      choice.dataset.stepIndex = String(index);
-      choice.setAttribute("aria-pressed", String(zone === step.zone));
-      grid.append(choice);
-    }
-    picker.append(grid);
-    return picker;
-  }
-
   function renderStep(step: Step, index: number): HTMLElement {
     const article = element("article", { className: "builder-step" });
     const summary = element("div", { className: "builder-step__summary" });
     summary.append(element("span", { className: "builder-step__number", text: `${index + 1}.` }));
 
-    const stepLabel = button("", "builder-step__label");
+    const stepLabel = element("div", { className: "builder-step__label" });
     stepLabel.append(
       element("strong", { text: step.label }),
-      element("small", { text: step.type === "hotkey" ? "Hotkey action" : "Click action" }),
+      element("small", { text: step.type === "hotkey" ? "Hotkey action" : "Left-click action" }),
     );
-    if (step.type === "click") stepLabel.dataset.expandClick = String(index);
     summary.append(stepLabel);
 
-    const detail = step.type === "hotkey" ? options.bindingForAction(step.action) : `Zone ${step.zone}`;
+    const detail = step.type === "hotkey" ? options.bindingForAction(step.action) : "Left click";
     summary.append(element("kbd", { text: detail }));
     const remove = button("×", "icon-button");
     remove.dataset.deleteStep = String(index);
     remove.setAttribute("aria-label", `Delete step ${index + 1}`);
     summary.append(remove);
     article.append(summary);
-
-    if (step.type === "click" && expandedClickStep === index) article.append(renderClickPicker(step, index));
-
-    const fields = element("div", { className: "builder-step__fields" });
-    const tip = element("input");
-    tip.dataset.stepTip = String(index);
-    tip.value = step.tip ?? "";
-    tip.placeholder = "Optional explanation";
-    tip.setAttribute("aria-label", `Optional tip for step ${index + 1}`);
-    fields.append(labelledControl("Tip", tip));
-
-    const failure = element("select");
-    failure.dataset.stepFailure = String(index);
-    failure.setAttribute("aria-label", `Failure handling for step ${index + 1}`);
-    const wait = element("option", { text: "Wait" });
-    wait.value = "wait";
-    const restart = element("option", { text: "Restart sequence" });
-    restart.value = "restart_sequence";
-    failure.append(wait, restart);
-    failure.value = step.onFailure;
-    fields.append(labelledControl("On incorrect input", failure));
-    article.append(fields);
     return article;
   }
 
-  function modalHeader(): HTMLElement {
-    const header = element("div", { className: "builder-modal__header" });
-    const copy = element("div");
-    copy.append(element("p", { className: "eyebrow", text: "Add hotkey step" }), element("h2", { id: "hotkey-dialog-title", text: "Choose an action" }));
-    const close = button("×", "icon-button", "close-hotkey-modal");
-    close.setAttribute("aria-label", "Close action search");
-    header.append(copy, close);
-    return header;
+  function matchingActions(): PreparedAction[] {
+    const normalized = searchQuery.trim().toLowerCase();
+    if (normalized === "") return [];
+    return preparedActions
+      .filter((action) => action.searchText.includes(normalized))
+      .map((action, index) => {
+        const label = action.label.toLowerCase();
+        const binding = action.binding.toLowerCase();
+        const score = binding === normalized
+          ? 0
+          : label.startsWith(normalized)
+            ? 1
+            : label.split(/\s+/).some((word) => word.startsWith(normalized))
+              ? 2
+              : label.includes(normalized)
+                ? 3
+                : 4;
+        return { action, index, score };
+      })
+      .sort((left, right) => left.score - right.score || left.index - right.index)
+      .map(({ action }) => action)
+      .slice(0, MAX_VISIBLE_ACTIONS);
   }
 
-  function renderModal(): HTMLElement | null {
-    if (!modalOpen) return null;
-    const backdrop = element("div", { className: "builder-modal" });
-    backdrop.dataset.modalBackdrop = "";
-    backdrop.setAttribute("role", "presentation");
-    const dialog = element("section", { className: "builder-modal__dialog" });
-    dialog.setAttribute("role", "dialog");
-    dialog.setAttribute("aria-modal", "true");
-    dialog.setAttribute("aria-labelledby", "hotkey-dialog-title");
-    dialog.append(modalHeader());
-    backdrop.append(dialog);
+  function matchingSelections(): typeof STARTING_SELECTION_CHOICES {
+    if (!selectionSearchOpen) return [];
+    const normalized = currentSequence().startingSelectionText.trim().toLowerCase();
+    if (!selectionFiltering || normalized === "") return STARTING_SELECTION_CHOICES;
+    return STARTING_SELECTION_CHOICES
+      .filter((choice) =>
+        choice.label.toLowerCase().includes(normalized)
+        || choice.group.toLowerCase() === normalized
+      )
+      .map((choice, index) => ({
+        choice,
+        index,
+        score: choice.label.toLowerCase().startsWith(normalized) ? 0 : 1,
+      }))
+      .sort((left, right) => left.score - right.score || left.index - right.index)
+      .map(({ choice }) => choice);
+  }
 
-    if (modalLoading) {
-      dialog.setAttribute("aria-busy", "true");
-      const loading = element("div", { className: "action-loading" });
-      loading.setAttribute("role", "status");
-      const spinner = element("span", { className: "loading-spinner" });
-      spinner.setAttribute("aria-hidden", "true");
-      loading.append(spinner, element("p", { text: "Loading hotkey actions…" }));
-      dialog.append(loading);
-      return backdrop;
-    }
+  function moveActiveIndex(current: number, direction: -1 | 1, length: number): number {
+    if (length === 0) return 0;
+    return (current + direction + length) % length;
+  }
 
-    const searchLabel = element("label", { className: "search-field", text: "Search by action or hotkey" });
-    searchLabel.htmlFor = "action-search";
-    const search = element("input", { id: "action-search" });
+  function renderStepSearch(): HTMLElement {
+    const field = element("div", { className: "step-search-field" });
+    const label = fieldLabel(
+      "Add step",
+      "step-search",
+      "Search for each action in the order the player should perform it. Left Click is included.",
+    );
+
+    const control = element("div", { className: "step-search" });
+    const search = element("input", { id: "step-search" });
     search.type = "search";
     search.value = searchQuery;
-    search.placeholder = "Example: mining camp or E";
+    search.placeholder = "Search actions, hotkeys, or left click";
     search.autocomplete = "off";
-    dialog.append(searchLabel, search);
+    search.setAttribute("role", "combobox");
+    search.setAttribute("aria-autocomplete", "list");
+    search.setAttribute("aria-controls", "step-search-results");
+    search.setAttribute("aria-expanded", searchQuery.trim() === "" ? "false" : "true");
+    const matches = matchingActions();
+    if (matches.length > 0) {
+      search.setAttribute("aria-activedescendant", `step-search-option-${stepActiveIndex}`);
+    }
+    control.append(search);
 
-    const normalized = searchQuery.trim().toLowerCase();
-    const matches = (preparedActions ?? []).filter((action) => action.searchText.includes(normalized));
-    const visibleMatches = matches.slice(0, MAX_VISIBLE_ACTIONS);
-    const countText = matches.length > visibleMatches.length
-      ? `Showing ${visibleMatches.length} of ${matches.length} matches. Refine your search to see more.`
-      : `${matches.length} matching action${matches.length === 1 ? "" : "s"}.`;
-    dialog.append(element("p", { className: "action-results__count", text: countText }));
-    const results = element("div", { className: "action-results" });
+    const results = element("div", { className: "action-results", id: "step-search-results" });
     results.setAttribute("role", "listbox");
-    if (visibleMatches.length === 0) {
+    if (searchQuery.trim() !== "" && matches.length === 0) {
       results.append(element("p", { className: "empty-state", text: "No actions match this search." }));
     } else {
-      for (const action of visibleMatches) {
-        const result = button("", "action-result");
-        result.dataset.addAction = action.id;
+      matches.forEach((action, index) => {
+        const result = button("", `action-result${index === stepActiveIndex ? " action-result--active" : ""}`);
+        result.id = `step-search-option-${index}`;
+        result.dataset.addStep = action.id;
         result.setAttribute("role", "option");
-        const copy = element("span");
-        copy.append(element("strong", { text: action.label }), element("small", { text: action.id }));
-        result.append(copy, element("kbd", { text: action.binding }));
+        result.setAttribute("aria-selected", String(index === stepActiveIndex));
+        result.append(
+          element("strong", { text: action.label }),
+          element("kbd", { text: action.binding }),
+        );
         results.append(result);
-      }
+      });
     }
-    dialog.append(results);
-    return backdrop;
+    if (results.childElementCount > 0) control.append(results);
+    field.append(label, control);
+    return field;
   }
 
   function render(): void {
@@ -210,165 +290,495 @@ export function mountDrillBuilder(root: HTMLElement, options: BuilderOptions): v
 
     const topbar = element("div", { className: "builder__topbar" });
     topbar.append(button("← Back", "button button--text", "builder-back"));
-    topbar.append(element("p", { className: "eyebrow", id: "builder-title", text: initial ? "Edit custom drill" : "Create custom drill" }));
+    topbar.append(element("p", {
+      className: "eyebrow",
+      id: "builder-title",
+      text: initial ? "Edit custom drill" : "Create custom drill",
+    }));
     const topActions = element("div", { className: "builder__topbar-actions" });
     if (initial) topActions.append(button("Delete drill", "button button--danger", "delete-drill"));
     topActions.append(button("Save drill", "button button--secondary", "save-drill"));
     topbar.append(topActions);
     builder.append(topbar);
 
-    const metadata = element("div", { className: "builder__metadata" });
-    const nameLabel = element("label", { text: "Drill name" });
-    nameLabel.htmlFor = "drill-name";
-    const nameInput = element("input", { id: "drill-name" });
-    nameInput.value = name;
-    nameInput.placeholder = "Villager Building Placement";
-    const descriptionLabel = element("label", { text: "Description" });
-    descriptionLabel.htmlFor = "drill-description";
-    const descriptionInput = element("textarea", { id: "drill-description" });
-    descriptionInput.rows = 2;
-    descriptionInput.value = description;
-    descriptionInput.placeholder = "Practice villager building-placement sequences";
-    const durationLabel = element("label", { text: "Total drill time" });
-    durationLabel.htmlFor = "drill-duration";
-    const duration = element("div", { className: "duration-field" });
-    const durationInput = element("input", { id: "drill-duration" });
-    durationInput.type = "number";
-    durationInput.min = "1";
-    durationInput.step = "1";
-    durationInput.value = String(Math.round(totalTimeMs / 1000));
-    duration.append(durationInput, element("span", { text: "seconds" }));
-    metadata.append(nameLabel, nameInput, descriptionLabel, descriptionInput, durationLabel, duration);
-    builder.append(metadata);
+    const details = element("section", {
+      className: `builder-details${detailsExpanded ? " builder-details--expanded" : ""}`,
+    });
+    const detailsSummary = element("div", { className: "builder-details__summary" });
+    const detailsCopy = element("div");
+    detailsCopy.append(
+      element("span", { text: "Drill details" }),
+      element("strong", {
+        className: "builder-details__name",
+        text: name.trim() || "Untitled drill",
+      }),
+    );
+    if (!detailsExpanded && description.trim()) {
+      detailsCopy.append(element("small", { text: description.trim() }));
+    }
+    const detailsToggle = button("", "icon-button builder-details__toggle", "toggle-drill-details");
+    const chevron = element("span", { className: "builder-details__chevron" });
+    chevron.setAttribute("aria-hidden", "true");
+    detailsToggle.append(chevron);
+    detailsToggle.setAttribute(
+      "aria-label",
+      detailsExpanded ? "Collapse drill details" : "Expand drill details",
+    );
+    detailsToggle.setAttribute("aria-expanded", String(detailsExpanded));
+    detailsToggle.setAttribute("aria-controls", "drill-details-fields");
+    detailsSummary.append(detailsCopy, detailsToggle);
+    details.append(detailsSummary);
+
+    if (detailsExpanded) {
+      const metadata = element("div", {
+        className: "builder__metadata",
+        id: "drill-details-fields",
+      });
+      const nameLabel = fieldLabel(
+        "Drill name",
+        "drill-name",
+        "The name players see when choosing this drill.",
+      );
+      const nameInput = element("input", { id: "drill-name" });
+      nameInput.value = name;
+      nameInput.placeholder = "Villager Building Placement";
+      const descriptionLabel = fieldLabel(
+        "Description",
+        "drill-description",
+        "A short explanation of what the drill helps players practise.",
+      );
+      const descriptionInput = element("textarea", { id: "drill-description" });
+      descriptionInput.rows = 2;
+      descriptionInput.value = description;
+      descriptionInput.placeholder = "Practice villager building-placement sequences";
+      metadata.append(
+        nameLabel,
+        nameInput,
+        descriptionLabel,
+        descriptionInput,
+      );
+      details.append(metadata);
+    }
+    builder.append(details);
+
+    const switcher = element("nav", { className: "sequence-switcher" });
+    switcher.setAttribute("aria-label", "Drill sequences");
+    const sequenceTabs = element("div", { className: "sequence-tabs" });
+    sequenceTabs.setAttribute("role", "tablist");
+    sequences.forEach((item, index) => {
+      const selected = index === sequenceIndex;
+      const tab = button(
+        `${index + 1}. ${item.name.trim() || "Untitled sequence"}`,
+        `sequence-tab${selected ? " sequence-tab--active" : ""}`,
+      );
+      tab.dataset.sequenceIndex = String(index);
+      tab.dataset.sequenceId = item.id;
+      tab.setAttribute("role", "tab");
+      tab.setAttribute("aria-selected", String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+      sequenceTabs.append(tab);
+    });
+    const addSequence = button("+ Add sequence", "button button--secondary sequence-add", "add-sequence");
+    addSequence.append(element("kbd", { text: "Ctrl/⌘ + Enter" }));
+    const navigationShortcut = element("span", { className: "sequence-navigation-shortcut" });
+    navigationShortcut.setAttribute(
+      "aria-label",
+      "Previous or next sequence: Control or Command plus Shift plus left or right arrow",
+    );
+    navigationShortcut.append(element("kbd", { text: "Ctrl/⌘ + Shift + ←/→" }));
+    switcher.append(sequenceTabs, navigationShortcut, addSequence);
+    builder.append(switcher);
 
     const editor = element("section", { className: "sequence-editor" });
     editor.setAttribute("aria-labelledby", "sequence-heading");
     const editorHeader = element("div", { className: "sequence-editor__header" });
-    editorHeader.append(element("p", { className: "eyebrow", id: "sequence-heading", text: `Sequence ${sequenceIndex + 1} of ${sequences.length}` }));
+    editorHeader.append(element("p", {
+      className: "eyebrow",
+      id: "sequence-heading",
+      text: `Sequence ${sequenceIndex + 1} of ${sequences.length}`,
+    }));
     const deleteSequence = button("×", "icon-button", "delete-sequence");
     deleteSequence.disabled = sequences.length === 1;
     deleteSequence.setAttribute("aria-label", `Delete sequence ${sequenceIndex + 1}`);
     editorHeader.append(deleteSequence);
     editor.append(editorHeader);
 
-    const sequenceLabel = element("label", { text: "Name" });
-    sequenceLabel.htmlFor = "sequence-name";
+    const sequenceFields = element("div", { className: "sequence-fields" });
+    const sequenceLabel = fieldLabel(
+      "Sequence name",
+      "sequence-name",
+      "The objective title shown while the player performs this sequence.",
+    );
     const sequenceName = element("input", { id: "sequence-name" });
     sequenceName.value = sequence.name;
     sequenceName.placeholder = "Mining Camp";
-    editor.append(sequenceLabel, sequenceName);
+    sequenceFields.append(sequenceLabel, sequenceName);
 
-    const targetFieldset = element("fieldset", { className: "target-times" });
-    targetFieldset.append(element("legend", { text: "Target time" }), element("p", { text: "Completion time for each difficulty." }));
-    const targetGrid = element("div", { className: "target-times__grid" });
-    DIFFICULTIES.forEach((difficulty, index) => {
-      const input = element("input");
-      input.dataset.targetTime = String(index);
-      input.type = "number";
-      input.min = "1";
-      input.step = "100";
-      input.value = String(sequence.targetTimeMs[index]);
-      const value = element("span");
-      value.append(input, element("small", { text: "ms" }));
-      const label = element("label", { text: difficulty });
-      label.append(value);
-      targetGrid.append(label);
-    });
-    targetFieldset.append(targetGrid);
-    editor.append(targetFieldset);
+    const selectionLabel = fieldLabel(
+      "Selected at start",
+      "sequence-starting-selection",
+      "Tells the trainer which unit or building menu should be visible before the first step.",
+    );
+    const selectionControl = element("div", { className: "selection-search" });
+    const selection = element("input", { id: "sequence-starting-selection" });
+    selection.type = "search";
+    selection.autocomplete = "off";
+    selection.value = sequence.startingSelectionText;
+    selection.placeholder = "Search units or buildings";
+    selection.setAttribute("role", "combobox");
+    selection.setAttribute("aria-autocomplete", "list");
+    selection.setAttribute("aria-controls", "sequence-starting-selection-results");
+    selection.setAttribute("aria-expanded", String(selectionSearchOpen));
+    const selectionMatches = matchingSelections();
+    if (selectionMatches.length > 0) {
+      selection.setAttribute(
+        "aria-activedescendant",
+        `sequence-starting-selection-option-${selectionActiveIndex}`,
+      );
+    }
+    selectionControl.append(selection);
+    if (selectionSearchOpen) {
+      const results = element("div", {
+        className: "action-results selection-results",
+        id: "sequence-starting-selection-results",
+      });
+      results.setAttribute("role", "listbox");
+      if (selectionMatches.length === 0) {
+        results.append(element("p", { className: "empty-state", text: "No selections match this search." }));
+      } else {
+        selectionMatches.forEach((choice, index) => {
+          const isSelected = startingSelectionKey(choice.selection)
+            === startingSelectionKey(sequence.startingSelection);
+          const result = button(
+            "",
+            `action-result selection-result${index === selectionActiveIndex ? " action-result--active" : ""}${isSelected ? " selection-result--selected" : ""}`,
+          );
+          result.id = `sequence-starting-selection-option-${index}`;
+          result.dataset.selectStartingSelection = startingSelectionKey(choice.selection);
+          result.setAttribute("role", "option");
+          result.setAttribute("aria-selected", String(isSelected));
+          const copy = element("span");
+          copy.append(
+            element("strong", { text: choice.label }),
+            element("small", { text: choice.group }),
+          );
+          result.append(copy);
+          if (isSelected) result.append(element("small", { className: "selection-result__current", text: "Selected" }));
+          results.append(result);
+        });
+      }
+      selectionControl.append(results);
+    }
+    sequenceFields.append(selectionLabel, selectionControl);
+
+    const proTargetLabel = fieldLabel(
+      "Pro target time",
+      "sequence-pro-target",
+      "The expert completion goal. The trainer calculates all easier difficulty targets automatically.",
+    );
+    const proTarget = element("div", { className: "duration-field" });
+    const proTargetInput = element("input", { id: "sequence-pro-target" });
+    proTargetInput.type = "number";
+    proTargetInput.min = "0.05";
+    proTargetInput.step = "0.05";
+    proTargetInput.value = String(sequence.proTargetMs / 1000);
+    proTarget.append(proTargetInput, element("span", { text: "seconds" }));
+    sequenceFields.append(proTargetLabel, proTarget);
+    editor.append(sequenceFields);
 
     const steps = element("div", { className: "builder-steps" });
-    if (sequence.steps.length === 0) steps.append(element("p", { className: "empty-state", text: "Add the first hotkey or click step for this sequence." }));
-    else sequence.steps.forEach((step, index) => steps.append(renderStep(step, index)));
-    editor.append(steps);
-
-    const addActions = element("div", { className: "add-step-actions" });
-    addActions.append(button("+ Add hotkey step", "button button--secondary", "add-hotkey-step"), button("+ Add click zone", "button button--secondary", "add-click-step"));
-    editor.append(addActions);
-    const navigation = element("div", { className: "sequence-navigation" });
-    const previous = button("← Prev sequence", "button button--text", "previous-sequence");
-    previous.disabled = sequenceIndex === 0;
-    const addSequence = button("+ Add another sequence", "button button--secondary", "add-sequence");
-    const next = button("Next sequence →", "button button--text", "next-sequence");
-    next.disabled = sequenceIndex === sequences.length - 1;
-    navigation.append(previous, addSequence, next);
-    editor.append(navigation);
+    sequence.steps.forEach((step, index) => steps.append(renderStep(step, index)));
+    editor.append(steps, renderStepSearch());
     builder.append(editor);
+
     if (errorMessage) {
       const error = element("p", { className: "builder-error", text: errorMessage });
       error.setAttribute("role", "alert");
       builder.append(error);
     }
 
-    const modal = renderModal();
-    root.replaceChildren(builder, ...(modal ? [modal] : []));
+    root.replaceChildren(builder);
     bindEvents();
   }
 
+  function renderAndRestoreSearchFocus(): void {
+    render();
+    const search = root.querySelector<HTMLInputElement>("#step-search");
+    search?.focus();
+    search?.setSelectionRange(searchQuery.length, searchQuery.length);
+    root.querySelector<HTMLElement>(`#step-search-option-${stepActiveIndex}`)
+      ?.scrollIntoView({ block: "nearest" });
+  }
+
+  function renderAndRestoreSelectionFocus(selectText = false): void {
+    if (!selectionSearchOpen) suppressSelectionOpenOnce = true;
+    render();
+    const search = root.querySelector<HTMLInputElement>("#sequence-starting-selection");
+    search?.focus();
+    if (selectText) search?.select();
+    else search?.setSelectionRange(search.value.length, search.value.length);
+    root.querySelector<HTMLElement>(`#sequence-starting-selection-option-${selectionActiveIndex}`)
+      ?.scrollIntoView({ block: "nearest" });
+  }
+
+  function renderAndFocusSequenceName(): void {
+    render();
+    root.querySelector<HTMLInputElement>("#sequence-name")?.focus();
+    root.querySelector<HTMLElement>(".sequence-tab--active")
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+
+  function addStep(choiceId: string): void {
+    const choice = preparedActions.find((candidate) => candidate.id === choiceId);
+    if (!choice) return;
+    if (choice.type === "click") {
+      currentSequence().steps.push({ type: "click", label: "Left click anywhere" });
+    } else {
+      currentSequence().steps.push({ type: "hotkey", action: choice.id, label: choice.label });
+    }
+    searchQuery = "";
+    stepActiveIndex = 0;
+    renderAndRestoreSearchFocus();
+  }
+
+  function chooseStartingSelection(selectionKey: string): void {
+    const choice = STARTING_SELECTION_CHOICES.find((candidate) =>
+      startingSelectionKey(candidate.selection) === selectionKey
+    );
+    if (!choice) return;
+    const sequence = currentSequence();
+    sequence.startingSelection = { ...choice.selection };
+    sequence.startingSelectionText = choice.label;
+    selectionSearchOpen = false;
+    selectionFiltering = false;
+    selectionActiveIndex = 0;
+    renderAndRestoreSelectionFocus();
+  }
+
+  function switchSequence(nextIndex: number, focusName = false): void {
+    sequenceIndex = nextIndex;
+    searchQuery = "";
+    stepActiveIndex = 0;
+    selectionSearchOpen = false;
+    selectionFiltering = false;
+    selectionActiveIndex = 0;
+    if (focusName) renderAndFocusSequenceName();
+    else render();
+  }
+
+  function addSequence(): void {
+    const previous = currentSequence();
+    const next = newSequence(nextSequenceNumber(sequences));
+    next.startingSelection = { ...previous.startingSelection };
+    next.startingSelectionText = selectedAtStartLabel(previous.startingSelection);
+    sequences.push(next);
+    switchSequence(sequences.length - 1, true);
+  }
+
   function bindEvents(): void {
+    root.querySelector<HTMLElement>(".builder")?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        addSequence();
+        return;
+      }
+      if (
+        (!event.ctrlKey && !event.metaKey)
+        || !event.shiftKey
+        || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")
+      ) return;
+      event.preventDefault();
+      const direction = event.key === "ArrowLeft" ? -1 : 1;
+      const nextIndex = sequenceIndex + direction;
+      if (nextIndex >= 0 && nextIndex < sequences.length) {
+        switchSequence(nextIndex, true);
+      }
+    });
     root.querySelector<HTMLButtonElement>("#builder-back")?.addEventListener("click", options.onBack);
     root.querySelector<HTMLButtonElement>("#delete-drill")?.addEventListener("click", () => options.onDelete?.());
-    root.querySelector<HTMLInputElement>("#drill-name")?.addEventListener("input", (event) => { name = (event.currentTarget as HTMLInputElement).value; });
-    root.querySelector<HTMLTextAreaElement>("#drill-description")?.addEventListener("input", (event) => { description = (event.currentTarget as HTMLTextAreaElement).value; });
-    root.querySelector<HTMLInputElement>("#drill-duration")?.addEventListener("input", (event) => { totalTimeMs = Number((event.currentTarget as HTMLInputElement).value) * 1000; });
-    root.querySelector<HTMLInputElement>("#sequence-name")?.addEventListener("input", (event) => { currentSequence().name = (event.currentTarget as HTMLInputElement).value; });
-    root.querySelectorAll<HTMLInputElement>("[data-target-time]").forEach((input) => input.addEventListener("input", () => { currentSequence().targetTimeMs[Number(input.dataset.targetTime)] = Number(input.value); }));
-    root.querySelectorAll<HTMLInputElement>("[data-step-tip]").forEach((input) => input.addEventListener("input", () => { const step = currentSequence().steps[Number(input.dataset.stepTip)]; if (step) step.tip = input.value; }));
-    root.querySelectorAll<HTMLSelectElement>("[data-step-failure]").forEach((select) => select.addEventListener("change", () => { const step = currentSequence().steps[Number(select.dataset.stepFailure)]; if (step) step.onFailure = select.value as FailureHandling; }));
-    root.querySelectorAll<HTMLButtonElement>("[data-delete-step]").forEach((item) => item.addEventListener("click", () => { currentSequence().steps.splice(Number(item.dataset.deleteStep), 1); expandedClickStep = null; render(); }));
-    root.querySelectorAll<HTMLButtonElement>("[data-expand-click]").forEach((item) => item.addEventListener("click", () => { const index = Number(item.dataset.expandClick); expandedClickStep = expandedClickStep === index ? null : index; render(); }));
-    root.querySelectorAll<HTMLButtonElement>("[data-select-step-zone]").forEach((item) => item.addEventListener("click", () => {
-      const step = currentSequence().steps[Number(item.dataset.stepIndex)];
-      if (step?.type === "click") { step.zone = Number(item.dataset.selectStepZone); step.label = `Click zone ${step.zone}`; expandedClickStep = null; render(); }
-    }));
-    root.querySelector<HTMLButtonElement>("#add-hotkey-step")?.addEventListener("click", openHotkeyModal);
-    root.querySelector<HTMLButtonElement>("#add-click-step")?.addEventListener("click", () => { currentSequence().steps.push({ type: "click", zone: 1, label: "Click zone 1", onFailure: "wait" }); expandedClickStep = currentSequence().steps.length - 1; render(); });
-    root.querySelector<HTMLInputElement>("#action-search")?.addEventListener("input", (event) => { searchQuery = (event.currentTarget as HTMLInputElement).value; render(); const input = root.querySelector<HTMLInputElement>("#action-search"); input?.focus(); input?.setSelectionRange(searchQuery.length, searchQuery.length); });
-    root.querySelector<HTMLButtonElement>("#close-hotkey-modal")?.addEventListener("click", closeModal);
-    root.querySelector<HTMLElement>("[data-modal-backdrop]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) closeModal(); });
-    root.querySelectorAll<HTMLButtonElement>("[data-add-action]").forEach((item) => item.addEventListener("click", () => { const action = options.actions.find((candidate) => candidate.id === item.dataset.addAction); if (!action) return; currentSequence().steps.push({ type: "hotkey", action: action.id, label: action.label, onFailure: "wait" }); modalOpen = false; render(); }));
-    root.querySelector<HTMLButtonElement>("#previous-sequence")?.addEventListener("click", () => { sequenceIndex -= 1; expandedClickStep = null; render(); });
-    root.querySelector<HTMLButtonElement>("#next-sequence")?.addEventListener("click", () => { sequenceIndex += 1; expandedClickStep = null; render(); });
-    root.querySelector<HTMLButtonElement>("#add-sequence")?.addEventListener("click", () => { sequences.push(newSequence(sequences.length + 1)); sequenceIndex = sequences.length - 1; expandedClickStep = null; render(); });
-    root.querySelector<HTMLButtonElement>("#delete-sequence")?.addEventListener("click", () => { if (sequences.length === 1) return; sequences.splice(sequenceIndex, 1); sequenceIndex = Math.min(sequenceIndex, sequences.length - 1); render(); });
+    root.querySelector<HTMLButtonElement>("#toggle-drill-details")?.addEventListener("click", () => {
+      detailsExpanded = !detailsExpanded;
+      render();
+      if (detailsExpanded) root.querySelector<HTMLInputElement>("#drill-name")?.focus();
+      else root.querySelector<HTMLInputElement>("#sequence-name")?.focus();
+    });
+    root.querySelector<HTMLInputElement>("#drill-name")?.addEventListener("input", (event) => {
+      name = (event.currentTarget as HTMLInputElement).value;
+      const summaryName = root.querySelector<HTMLElement>(".builder-details__name");
+      if (summaryName) summaryName.textContent = name.trim() || "Untitled drill";
+    });
+    root.querySelector<HTMLTextAreaElement>("#drill-description")?.addEventListener("input", (event) => {
+      description = (event.currentTarget as HTMLTextAreaElement).value;
+    });
+    root.querySelector<HTMLInputElement>("#sequence-name")?.addEventListener("input", (event) => {
+      const sequenceName = (event.currentTarget as HTMLInputElement).value;
+      currentSequence().name = sequenceName;
+      const activeTab = root.querySelector<HTMLButtonElement>(".sequence-tab--active");
+      if (activeTab) {
+        activeTab.textContent = `${sequenceIndex + 1}. ${sequenceName.trim() || "Untitled sequence"}`;
+      }
+    });
+    root.querySelector<HTMLInputElement>("#sequence-starting-selection")?.addEventListener("focus", () => {
+      if (suppressSelectionOpenOnce) {
+        suppressSelectionOpenOnce = false;
+        return;
+      }
+      if (selectionSearchOpen) return;
+      selectionSearchOpen = true;
+      selectionFiltering = false;
+      selectionActiveIndex = Math.max(0, STARTING_SELECTION_CHOICES.findIndex((choice) =>
+        startingSelectionKey(choice.selection) === startingSelectionKey(currentSequence().startingSelection)
+      ));
+      renderAndRestoreSelectionFocus(true);
+    });
+    root.querySelector<HTMLInputElement>("#sequence-starting-selection")?.addEventListener("input", (event) => {
+      currentSequence().startingSelectionText = (event.currentTarget as HTMLInputElement).value;
+      selectionSearchOpen = true;
+      selectionFiltering = true;
+      selectionActiveIndex = 0;
+      renderAndRestoreSelectionFocus();
+    });
+    root.querySelector<HTMLInputElement>("#sequence-starting-selection")?.addEventListener("keydown", (event) => {
+      const matches = matchingSelections();
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        selectionSearchOpen = true;
+        selectionActiveIndex = moveActiveIndex(
+          selectionActiveIndex,
+          event.key === "ArrowDown" ? 1 : -1,
+          matches.length,
+        );
+        renderAndRestoreSelectionFocus();
+      } else if (event.key === "Enter" && !event.ctrlKey && !event.metaKey) {
+        const choice = matches[selectionActiveIndex];
+        if (choice) {
+          event.preventDefault();
+          chooseStartingSelection(startingSelectionKey(choice.selection));
+        }
+      } else if (event.key === "Escape" && selectionSearchOpen) {
+        event.preventDefault();
+        const sequence = currentSequence();
+        sequence.startingSelectionText = selectedAtStartLabel(sequence.startingSelection);
+        selectionSearchOpen = false;
+        selectionFiltering = false;
+        selectionActiveIndex = 0;
+        renderAndRestoreSelectionFocus();
+      }
+    });
+    root.querySelector<HTMLElement>(".selection-search")?.addEventListener("focusout", (event) => {
+      const control = event.currentTarget as HTMLElement;
+      const nextTarget = event.relatedTarget;
+      queueMicrotask(() => {
+        if (!control.isConnected) return;
+        if (nextTarget instanceof Node && control.contains(nextTarget)) return;
+        const sequence = currentSequence();
+        sequence.startingSelectionText = selectedAtStartLabel(sequence.startingSelection);
+        selectionSearchOpen = false;
+        selectionFiltering = false;
+        selectionActiveIndex = 0;
+        control.querySelector(".selection-results")?.remove();
+        const input = control.querySelector<HTMLInputElement>("#sequence-starting-selection");
+        if (input) {
+          input.value = sequence.startingSelectionText;
+          input.setAttribute("aria-expanded", "false");
+          input.removeAttribute("aria-activedescendant");
+        }
+      });
+    });
+    root.querySelectorAll<HTMLButtonElement>("[data-select-starting-selection]").forEach((item) =>
+      item.addEventListener("click", () =>
+        chooseStartingSelection(item.dataset.selectStartingSelection ?? "")
+      )
+    );
+    root.querySelector<HTMLInputElement>("#sequence-pro-target")?.addEventListener("input", (event) => {
+      currentSequence().proTargetMs = Math.round(
+        Number((event.currentTarget as HTMLInputElement).value) * 1000,
+      );
+    });
+    root.querySelectorAll<HTMLButtonElement>("[data-delete-step]").forEach((item) =>
+      item.addEventListener("click", () => {
+        currentSequence().steps.splice(Number(item.dataset.deleteStep), 1);
+        render();
+      })
+    );
+    root.querySelector<HTMLInputElement>("#step-search")?.addEventListener("input", (event) => {
+      searchQuery = (event.currentTarget as HTMLInputElement).value;
+      stepActiveIndex = 0;
+      renderAndRestoreSearchFocus();
+    });
+    root.querySelector<HTMLInputElement>("#step-search")?.addEventListener("keydown", (event) => {
+      const matches = matchingActions();
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        stepActiveIndex = moveActiveIndex(
+          stepActiveIndex,
+          event.key === "ArrowDown" ? 1 : -1,
+          matches.length,
+        );
+        renderAndRestoreSearchFocus();
+      } else if (event.key === "Enter" && !event.ctrlKey && !event.metaKey) {
+        const activeMatch = matches[stepActiveIndex];
+        if (activeMatch) {
+          event.preventDefault();
+          addStep(activeMatch.id);
+        }
+      } else if (event.key === "Escape" && searchQuery !== "") {
+        searchQuery = "";
+        stepActiveIndex = 0;
+        renderAndRestoreSearchFocus();
+      }
+    });
+    root.querySelectorAll<HTMLButtonElement>("[data-add-step]").forEach((item) =>
+      item.addEventListener("click", () => addStep(item.dataset.addStep ?? ""))
+    );
+    root.querySelectorAll<HTMLButtonElement>("[data-sequence-index]").forEach((item) =>
+      item.addEventListener("click", () => switchSequence(Number(item.dataset.sequenceIndex)))
+    );
+    root.querySelector<HTMLButtonElement>("#add-sequence")?.addEventListener("click", addSequence);
+    root.querySelector<HTMLButtonElement>("#delete-sequence")?.addEventListener("click", () => {
+      if (sequences.length === 1) return;
+      sequences.splice(sequenceIndex, 1);
+      switchSequence(Math.min(sequenceIndex, sequences.length - 1));
+      root.querySelector<HTMLElement>(".sequence-tab--active")
+        ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
     root.querySelector<HTMLButtonElement>("#save-drill")?.addEventListener("click", save);
   }
 
-  function openHotkeyModal(): void {
-    modalOpen = true;
-    searchQuery = "";
-    if (preparedActions) { modalLoading = false; render(); root.querySelector<HTMLInputElement>("#action-search")?.focus(); return; }
-    modalLoading = true;
-    render();
-    window.requestAnimationFrame(() => window.setTimeout(() => {
-      if (!modalOpen) return;
-      preparedActions ??= options.actions.map((action) => {
-        const binding = options.bindingForAction(action.id);
-        return { ...action, binding, searchText: `${action.label} ${binding}`.toLowerCase() };
-      });
-      modalLoading = false;
-      render();
-      root.querySelector<HTMLInputElement>("#action-search")?.focus();
-    }, 0));
-  }
-
-  function closeModal(): void { modalOpen = false; modalLoading = false; render(); }
-
   function save(): void {
     errorMessage = "";
-    if (name.trim() === "") errorMessage = "Enter a drill name.";
-    else if (!Number.isInteger(totalTimeMs) || totalTimeMs <= 0) errorMessage = "Total drill time must be a positive number of seconds.";
-    else {
-      const invalidSequence = sequences.findIndex((sequence) => sequence.name.trim() === "" || sequence.steps.length === 0 || sequence.targetTimeMs.some((time) => !Number.isInteger(time) || time <= 0));
-      if (invalidSequence >= 0) errorMessage = `Complete the name, steps, and seven target times for sequence ${invalidSequence + 1}.`;
+    if (name.trim() === "") {
+      errorMessage = "Enter a drill name.";
+    } else {
+      const invalidSequence = sequences.findIndex((sequence) =>
+        sequence.name.trim() === ""
+        || sequence.steps.length === 0
+        || !Number.isInteger(sequence.proTargetMs)
+        || sequence.proTargetMs <= 0
+        || selectedAtStartLabel(sequence.startingSelection).toLowerCase()
+          !== sequence.startingSelectionText.trim().toLowerCase()
+      );
+      if (invalidSequence >= 0) {
+        errorMessage = `Complete the name, starting selection, steps, and Pro target time for sequence ${invalidSequence + 1}.`;
+      }
     }
-    if (errorMessage) { render(); root.querySelector<HTMLElement>(".builder-error")?.scrollIntoView({ block: "center" }); return; }
+    if (errorMessage) {
+      render();
+      root.querySelector<HTMLElement>(".builder-error")?.scrollIntoView({ block: "center" });
+      return;
+    }
+
     options.onSave({
       id: draftId,
       name: name.trim(),
       description: description.trim() || "Custom drill",
-      totalTimeMs,
-      sequences: sequences.map((sequence) => ({ id: sequence.id, name: sequence.name.trim(), steps: sequence.steps.map((step) => ({ ...step })), targetTimeMs: [...sequence.targetTimeMs] })),
+      sequences: sequences.map((sequence) => ({
+        id: sequence.id,
+        name: sequence.name.trim(),
+        startingSelection: { ...sequence.startingSelection },
+        steps: sequence.steps.map((step) => ({ ...step })),
+        targetTimeMs: targetTimesFromPro(sequence.proTargetMs),
+      })),
     });
   }
 

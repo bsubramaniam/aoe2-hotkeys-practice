@@ -6,51 +6,61 @@ import createHtml from "../drills/create.html?raw";
 import editHtml from "../drills/edit.html?raw";
 import drillsHtml from "../drills.html?raw";
 import indexHtml from "../index.html?raw";
+import { BUILTIN_DRILLS } from "../src/drills";
 import { MAX_HOTKEY_FILE_BYTES } from "../src/hotkey-file";
 
-const STORAGE_KEY = "aoe2-hotkey-practice.custom-drills.v1";
+const STORAGE_KEY = "aoe2-hotkey-practice.custom-drills.v2";
+const FIRST_CUSTOM_DRILL_INDEX = String(BUILTIN_DRILLS.length);
+const SECOND_CUSTOM_DRILL_INDEX = String(BUILTIN_DRILLS.length + 1);
 const targetTimes = [7000, 6000, 5000, 4000, 3000, 2000, 1000];
 
 function customDrill(id: string, step: Record<string, unknown>): Record<string, unknown> {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id,
     name: `${id} name`,
     description: `${id} description`,
-    totalTimeMs: 60_000,
-    sequences: [{ id: `${id}-sequence`, name: `${id} sequence`, targetTimeMs: targetTimes, sequence: [step] }],
+    sequences: [{
+      id: `${id}-sequence`,
+      name: `${id} sequence`,
+      startingSelection: { type: "none" },
+      targetTimeMs: targetTimes,
+      sequence: [step],
+    }],
   };
 }
 
-const clickDrill = customDrill("click-drill", { type: "click", zone: 2, onFailure: "wait" });
-const hotkeyDrill = customDrill("hotkey-drill", { type: "hotkey", action: "select_villager", onFailure: "wait" });
+const clickDrill = customDrill("click-drill", { type: "click" });
+const hotkeyDrill = customDrill("hotkey-drill", { type: "hotkey", action: "select_villager" });
 const branchingDrill = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   id: "branching-drill",
   name: "Branching drill",
   description: "Exercises multi-step practice feedback.",
-  totalTimeMs: 60_000,
   sequences: [
     {
       id: "multi-step",
       name: "Multi-step",
+      startingSelection: { type: "none" },
       targetTimeMs: [60_000, 60_000, 60_000, 60_000, 60_000, 60_000, 60_000],
       sequence: [
-        { type: "click", zone: 1, tip: "First", onFailure: "wait" },
-        { type: "click", zone: 2, onFailure: "restart_sequence" },
+        { type: "click", tip: "First" },
+        { type: "hotkey", action: "select_villager" },
       ],
     },
     {
       id: "over-target",
       name: "Over target",
+      startingSelection: { type: "none" },
       targetTimeMs: [1, 1, 1, 1, 1, 1, 1],
-      sequence: [{ type: "click", zone: 3, onFailure: "wait" }],
+      sequence: [{ type: "click" }],
     },
     {
       id: "not-completed",
       name: "Not completed",
+      startingSelection: { type: "none" },
       targetTimeMs: targetTimes,
-      sequence: [{ type: "click", zone: 4, onFailure: "wait" }],
+      sequence: [{ type: "click" }],
     },
   ],
 };
@@ -122,14 +132,14 @@ describe("application pages", () => {
   it("runs click sessions through completion, exit, and timeout results", async () => {
     await import("../src/main");
     expect(document.body.dataset.screen).toBe("setup");
-    expect(document.querySelectorAll("#drill-select option")).toHaveLength(3);
+    expect(document.querySelectorAll("#drill-select option")).toHaveLength(BUILTIN_DRILLS.length + 2);
     frames.shift()?.(performance.now());
 
     selectValue("#profile-source", "custom");
     expect(document.body.textContent).toContain("Choose both Hotkeys.hkp");
     selectValue("#profile-source", "default");
     selectValue("#difficulty-select", "6");
-    selectValue("#drill-select", "1");
+    selectValue("#drill-select", FIRST_CUSTOM_DRILL_INDEX);
 
     click("#start-button");
     expect(document.body.dataset.screen).toBe("practice");
@@ -143,11 +153,13 @@ describe("application pages", () => {
     expect(document.body.textContent).toContain("Practice paused");
     click("#pause-button");
 
-    frames.shift()?.(performance.now() + 20_000);
-    expect(document.querySelector<HTMLProgressElement>("#sequence-progress-bar")?.value).toBe(100);
-    click('[data-zone="1"]');
-    expect(document.body.textContent).toContain("Incorrect");
-    click('[data-zone="2"]');
+    frames.shift()?.(performance.now() + 900);
+    const progress = document.querySelector<HTMLProgressElement>("#sequence-progress-bar")?.value ?? 0;
+    expect(progress).toBeGreaterThan(85);
+    expect(progress).toBeLessThan(100);
+    expect(document.body.textContent).toContain("Left-click anywhere");
+    window.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, cancelable: true }));
+    click("#click-anywhere-target");
     expect(document.body.dataset.screen).toBe("results");
     expect(document.body.textContent).toContain("Drill complete");
 
@@ -165,11 +177,13 @@ describe("application pages", () => {
 
   it("keeps detached practice controls and missing setup panels safe", async () => {
     await import("../src/main");
-    selectValue("#drill-select", "1");
+    selectValue("#drill-select", FIRST_CUSTOM_DRILL_INDEX);
     click("#start-button");
     const oldPause = document.querySelector<HTMLButtonElement>("#pause-button");
     const oldExit = document.querySelector<HTMLButtonElement>("#exit-button");
-    click('[data-zone="2"]');
+    const oldClick = document.querySelector<HTMLButtonElement>("#click-anywhere-target");
+    click("#click-anywhere-target");
+    oldClick?.click();
     const setupButton = document.querySelector<HTMLButtonElement>("#setup-button");
     if (!setupButton) throw new Error("Setup button is missing.");
     document.querySelector("#setup-screen")?.remove();
@@ -189,8 +203,9 @@ describe("application pages", () => {
     if (!binding) throw new Error("The default select-villager binding is missing.");
 
     await import("../src/main");
-    selectValue("#drill-select", "2");
+    selectValue("#drill-select", SECOND_CUSTOM_DRILL_INDEX);
     click("#start-button");
+    window.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, cancelable: true }));
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Shift", code: "ShiftLeft", shiftKey: true }));
     window.dispatchEvent(new KeyboardEvent("keydown", { key: binding.key, code: `Key${binding.key.toUpperCase()}`, repeat: true }));
     window.dispatchEvent(new KeyboardEvent("keydown", {
@@ -203,25 +218,94 @@ describe("application pages", () => {
     expect(document.body.dataset.screen).toBe("results");
   });
 
+  it("accepts the selected profile mouse-wheel binding during practice", async () => {
+    const wheelDrill = customDrill("wheel-drill", {
+      type: "hotkey",
+      action: "hotkey_19331",
+    });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([wheelDrill]));
+    await import("../src/main");
+    selectValue("#drill-select", FIRST_CUSTOM_DRILL_INDEX);
+    click("#start-button");
+
+    window.dispatchEvent(new WheelEvent("wheel", { deltaY: 1, cancelable: true }));
+    expect(document.body.textContent).toContain("Try this step again");
+    window.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, cancelable: true }));
+    expect(document.body.dataset.screen).toBe("results");
+  });
+
+  it("shows the game-shaped command panel for the built-in drill", async () => {
+    const { createDefaultProfile } = await import("../src/default-profile");
+    const { getHotkeyAction } = await import("../src/hotkey-actions");
+    const profile = createDefaultProfile();
+    const press = (actionId: string): void => {
+      const action = getHotkeyAction(actionId);
+      const binding = action ? profile.bindings.get(action.stringId)?.[0] : undefined;
+      if (!binding) throw new Error(`Missing default binding for ${actionId}.`);
+      window.dispatchEvent(new KeyboardEvent("keydown", {
+        key: binding.key,
+        code: binding.key.length === 1 ? `Key${binding.key.toUpperCase()}` : binding.key,
+        ctrlKey: binding.ctrl,
+        altKey: binding.alt,
+        shiftKey: binding.shift,
+      }));
+    };
+
+    await import("../src/main");
+    click("#start-button");
+
+    expect([...document.querySelectorAll(".sequence-shortcut kbd")].map((item) => item.textContent)).toEqual([
+      "W",
+      "W",
+      "Click",
+    ]);
+    expect(document.querySelector(".practice-layout")).toBeNull();
+    expect(document.querySelector("#practice-screen")?.textContent).not.toContain("Your hotkeys");
+    expect(document.querySelector(".command-panel--villager")).not.toBeNull();
+    expect(document.querySelectorAll(".command-tile")).toHaveLength(15);
+    expect(document.querySelectorAll(".command-tile:not(.command-tile--empty)")).toHaveLength(2);
+    expect(document.querySelector(".command-tile--active")?.getAttribute("aria-label")).toContain("Military Buildings");
+    expect(document.querySelector(".sequence-target__category")?.textContent).toBe("Villager commands");
+    expect(document.querySelector(".sequence-target strong")?.textContent).toBe("Military Buildings");
+    expect(document.querySelector<HTMLImageElement>(".sequence-target__sprite")?.src).toContain("villager-command-panel.png");
+    expect(document.querySelector(".sequence-target__sprite")?.classList.contains("sequence-target__sprite--slot-1")).toBe(true);
+
+    press("open_military_buildings");
+    expect(document.querySelector(".command-panel--military")).not.toBeNull();
+    expect(document.querySelectorAll(".command-tile:not(.command-tile--empty)")).toHaveLength(10);
+    expect(document.querySelector(".command-tile--active")?.getAttribute("aria-label")).toContain("Archery Range");
+    expect(document.querySelector(".command-tile--active")?.classList.contains("command-tile--slot-1")).toBe(true);
+    expect(document.querySelector(".command-panel--military .command-tile--active")).not.toBeNull();
+    expect(document.querySelector(".sequence-target__category")?.textContent).toBe("Military building");
+    expect(document.querySelector(".sequence-target strong")?.textContent).toBe("Archery Range");
+    expect(document.querySelector<HTMLImageElement>(".sequence-target__sprite")?.src).toContain("military-buildings-panel.png");
+    expect(document.querySelector(".sequence-target__sprite")?.classList.contains("sequence-target__sprite--slot-1")).toBe(true);
+
+    press("build_archery_range");
+    expect(document.querySelector(".command-panel--military")).not.toBeNull();
+    expect(document.querySelector(".command-tile--active")?.getAttribute("aria-label")).toContain("Archery Range");
+    expect(document.querySelector("#click-anywhere-target")).not.toBeNull();
+    expect(document.body.textContent).toContain("Left-click anywhere");
+    expect(document.querySelector(".sequence-target strong")?.textContent).toBe("Archery Range");
+    expect(document.querySelector<HTMLImageElement>(".sequence-target__sprite")?.src).toContain("military-buildings-panel.png");
+  });
+
   it("renders every sequence state, feedback outcome, and result status", async () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify([branchingDrill]));
     await import("../src/main");
-    selectValue("#drill-select", "1");
+    selectValue("#drill-select", FIRST_CUSTOM_DRILL_INDEX);
     click("#start-button");
 
-    expect(document.querySelectorAll(".sequence-step--active")).toHaveLength(1);
-    expect(document.querySelectorAll(".sequence-step--pending")).toHaveLength(1);
-    click('[data-zone="5"]');
-    expect(document.body.textContent).toContain("Try this step again");
-    click('[data-zone="1"]');
+    expect(document.querySelectorAll(".sequence-shortcut--active")).toHaveLength(1);
+    expect(document.querySelectorAll(".sequence-shortcut--pending")).toHaveLength(1);
+    click("#click-anywhere-target");
     expect(document.body.textContent).toContain("Correct. Next step");
-    expect(document.querySelectorAll(".sequence-step--complete")).toHaveLength(1);
-    click('[data-zone="5"]');
-    expect(document.body.textContent).toContain("Sequence restarted");
-    click('[data-zone="1"]');
-    click('[data-zone="2"]');
+    expect(document.querySelectorAll(".sequence-shortcut--complete")).toHaveLength(1);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "x", code: "KeyX" }));
+    expect(document.body.textContent).toContain("Try this step again");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: ".", code: "Period" }));
     expect(document.body.textContent).toContain("Sequence complete");
-    click('[data-zone="3"]');
+    click("#click-anywhere-target");
     click("#exit-button");
 
     expect(document.body.textContent).toContain("On target");
@@ -234,7 +318,7 @@ describe("application pages", () => {
     const stringId = getHotkeyAction("select_villager")?.stringId;
     if (!stringId) throw new Error("Select-villager action is missing.");
     await import("../src/main");
-    selectValue("#drill-select", "2");
+    selectValue("#drill-select", SECOND_CUSTOM_DRILL_INDEX);
 
     const upload = async (name: string, buffer: ArrayBuffer): Promise<void> => {
       const input = document.querySelector<HTMLInputElement>("#hotkey-files");
@@ -288,7 +372,7 @@ describe("application pages", () => {
     const stringId = getHotkeyAction("select_villager")?.stringId;
     if (!stringId) throw new Error("Select-villager action is missing.");
     await import("../src/main");
-    selectValue("#drill-select", "2");
+    selectValue("#drill-select", SECOND_CUSTOM_DRILL_INDEX);
 
     const input = document.querySelector<HTMLInputElement>("#hotkey-files");
     if (input) Object.defineProperty(input, "files", { configurable: true, value: null });
@@ -346,15 +430,19 @@ describe("application pages", () => {
     await vi.waitFor(() => expect(document.body.textContent).toContain("could not be read"));
   });
 
-  it("ignores zone attempts while a hotkey step is active or practice is paused", async () => {
+  it("shows no click target for hotkeys and disables it while practice is paused", async () => {
     await import("../src/main");
-    selectValue("#drill-select", "2");
+    selectValue("#drill-select", SECOND_CUSTOM_DRILL_INDEX);
     click("#start-button");
-    const runningZone = document.querySelector<HTMLButtonElement>('[data-zone="1"]');
-    runningZone?.dispatchEvent(new Event("click", { bubbles: true }));
+    expect(document.querySelector("#click-anywhere-target")).toBeNull();
+    click("#exit-button");
+    click("#setup-button");
+    selectValue("#drill-select", FIRST_CUSTOM_DRILL_INDEX);
+    click("#start-button");
     click("#pause-button");
-    const pausedZone = document.querySelector<HTMLButtonElement>('[data-zone="1"]');
-    pausedZone?.dispatchEvent(new Event("click", { bubbles: true }));
+    const pausedTarget = document.querySelector<HTMLButtonElement>("#click-anywhere-target");
+    expect(pausedTarget?.disabled).toBe(true);
+    pausedTarget?.click();
     expect(document.body.textContent).toContain("Practice paused");
   });
 
@@ -369,7 +457,7 @@ describe("application pages", () => {
 
     await import("../src/main");
     expect(document.body.dataset.screen).toBe("drills");
-    expect(document.querySelectorAll(".drill-card")).toHaveLength(3);
+    expect(document.querySelectorAll(".drill-card")).toHaveLength(BUILTIN_DRILLS.length + 2);
     click('[data-drill-menu-trigger="0"]');
     expect(document.querySelector<HTMLElement>('[data-drill-menu="0"]')?.hidden).toBe(false);
     click('[data-export-drill="0"]');
@@ -380,11 +468,11 @@ describe("application pages", () => {
     click('[data-delete-drill="0"]');
     expect(confirm).toHaveBeenCalledOnce();
     click('[data-delete-drill="0"]');
-    expect(document.querySelectorAll(".drill-card")).toHaveLength(2);
+    expect(document.querySelectorAll(".drill-card")).toHaveLength(BUILTIN_DRILLS.length + 1);
 
     const validInput = document.querySelector<HTMLInputElement>("#drill-json-file");
     if (!validInput) throw new Error("Upload input is missing.");
-    const uploadedDrill = customDrill("uploaded", { type: "click", zone: 3, onFailure: "wait" });
+    const uploadedDrill = customDrill("uploaded", { type: "click" });
     delete uploadedDrill.id;
     Object.defineProperty(validInput, "files", {
       configurable: true,
@@ -414,7 +502,7 @@ describe("application pages", () => {
 
     const validInput = document.querySelector<HTMLInputElement>("#drill-json-file");
     if (!validInput) throw new Error("Upload input is missing.");
-    const createdDrill = customDrill("created", { type: "click", zone: 1, onFailure: "wait" });
+    const createdDrill = customDrill("created", { type: "click" });
     delete createdDrill.id;
     Object.defineProperty(validInput, "files", {
       configurable: true,
@@ -476,7 +564,7 @@ describe("application pages", () => {
     await import("../src/main");
     click('[data-delete-drill="0"]');
     click('[data-delete-drill="0"]');
-    expect(document.querySelectorAll(".drill-card")).toHaveLength(1);
+    expect(document.querySelectorAll(".drill-card")).toHaveLength(BUILTIN_DRILLS.length);
   });
 
   it("renders create, edit, and missing-edit routes", async () => {
@@ -484,9 +572,19 @@ describe("application pages", () => {
     history.replaceState(null, "", "/drills/create");
     await import("../src/main");
     expect(document.body.textContent).toContain("Create custom drill");
+    changeBuilderInput("#step-search", "skirmisher");
+    const skirmisherResults = [...document.querySelectorAll<HTMLElement>("[data-add-step]")]
+      .map((item) => item.textContent);
+    expect(skirmisherResults).toEqual(expect.arrayContaining([
+      expect.stringContaining("Skirmisher — Archery Range"),
+      expect.stringContaining("Skirmisher — Settlement"),
+    ]));
+    changeBuilderInput("#step-search", "villager");
+    expect(document.querySelectorAll("[data-add-step]").length).toBeGreaterThan(0);
     changeBuilderInput("#drill-name", "Created in page");
     changeBuilderInput("#sequence-name", "One");
-    click("#add-click-step");
+    changeBuilderInput("#step-search", "left click");
+    click('[data-add-step="__left_click__"]');
     click("#save-drill");
 
     vi.resetModules();
@@ -571,15 +669,14 @@ describe("application pages", () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify([clickDrill]));
     history.replaceState(null, "", "/?drillId=click-drill");
     await import("../src/main");
-    expect(document.querySelectorAll("#drill-select option")).toHaveLength(2);
-    expect(document.querySelector<HTMLSelectElement>("#drill-select")?.value).toBe("1");
+    expect(document.querySelectorAll("#drill-select option")).toHaveLength(BUILTIN_DRILLS.length + 1);
+    expect(document.querySelector<HTMLSelectElement>("#drill-select")?.value).toBe(FIRST_CUSTOM_DRILL_INDEX);
   });
 
   it("keeps setup initialization safe when optional authored status elements are absent", async () => {
     for (const selector of [
       "#drill-duration",
       "#drill-sequences",
-      "#drill-zones",
       "#mapping-warning",
       "#start-button",
       "#profile-source",
@@ -601,6 +698,12 @@ describe("application pages", () => {
     vi.resetModules();
     loadPage("index.html");
     document.querySelector("#drill-select")?.remove();
+    await expect(import("../src/main")).resolves.toBeDefined();
+
+    vi.resetModules();
+    loadPage("drills.html");
+    history.replaceState(null, "", "/drills");
+    document.querySelector("#drill-message")?.remove();
     await expect(import("../src/main")).resolves.toBeDefined();
   });
 });

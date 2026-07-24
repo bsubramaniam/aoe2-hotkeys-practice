@@ -1,11 +1,11 @@
-import { CLICK_ZONES } from "./click-zones";
+import { renderCommandPanel, renderSequenceTarget } from "./command-panel";
 import { customDrillFilename, drillToCustomFile, friendlyCustomDrillId, loadCustomDrills, parseCustomDrill, persistCustomDrills, upsertCustomDrill } from "./custom-drills";
 import { createDefaultProfile } from "./default-profile";
 import { mountDrillBuilder } from "./drill-builder";
 import { BUILTIN_DRILLS, getRequiredActions } from "./drills";
 import { actionsForStringIds, getHotkeyAction } from "./hotkey-actions";
-import { eventMatchesBinding, formatBinding, isModifierOnly, MAX_HOTKEY_FILE_BYTES, MAX_HOTKEY_FILES, parseHotkeyFiles, type HotkeyBinding, type HotkeyProfile, type NamedBuffer } from "./hotkey-file";
-import { createSession, exitSession, getDrillElapsedMs, getSequenceElapsedMs, submitAttempt, tickSession, togglePause } from "./trainer";
+import { eventMatchesBinding, formatBinding, isModifierOnly, isWheelBinding, MAX_HOTKEY_FILE_BYTES, MAX_HOTKEY_FILES, parseHotkeyFiles, wheelEventMatchesBinding, type HotkeyBinding, type HotkeyProfile, type NamedBuffer } from "./hotkey-file";
+import { createSession, exitSession, getDrillElapsedMs, getDrillTargetTimeMs, getSequenceElapsedMs, submitAttempt, tickSession, togglePause } from "./trainer";
 import { DIFFICULTIES, type Drill, type Session, type Step } from "./types";
 
 type Screen = "setup" | "drills" | "builder" | "practice" | "results";
@@ -127,10 +127,8 @@ function renderSetup(): void {
   difficultySelect.value = String(selectedDifficultyIndex);
   const duration = app.querySelector<HTMLElement>("#drill-duration");
   const sequences = app.querySelector<HTMLElement>("#drill-sequences");
-  const zones = app.querySelector<HTMLElement>("#drill-zones");
-  if (duration) duration.textContent = formatClock(drill.totalTimeMs);
+  if (duration) duration.textContent = formatClock(getDrillTargetTimeMs(drill, selectedDifficultyIndex));
   if (sequences) sequences.textContent = String(drill.sequences.length);
-  if (zones) zones.textContent = String(CLICK_ZONES.length);
 
   const warning = app.querySelector<HTMLElement>("#mapping-warning");
   if (warning) {
@@ -198,7 +196,7 @@ function drillCard(drill: Drill, index: number): HTMLElement {
   const titleRow = element("div", { className: "drill-card__title-row" });
   titleRow.append(element("h3", { text: drill.name }), element("span", { className: `status-pill${isCustom ? " status-pill--custom" : ""}`, text: isCustom ? "Custom" : "Built-in" }));
   const metadata = element("dl", { className: "drill-card__meta" });
-  for (const [term, value] of [["Duration", formatClock(drill.totalTimeMs)], ["Sequences", String(drill.sequences.length)]]) {
+  for (const [term, value] of [[`${DIFFICULTIES[selectedDifficultyIndex]} duration`, formatClock(getDrillTargetTimeMs(drill, selectedDifficultyIndex))], ["Sequences", String(drill.sequences.length)]]) {
     const item = element("div"); item.append(element("dt", { text: term }), element("dd", { text: value })); metadata.append(item);
   }
   select.append(titleRow, element("p", { text: drill.description }), metadata);
@@ -319,8 +317,11 @@ function activeStep(current: Session): Step {
   if (!step) throw new Error("The active sequence has no current step.");
   return step;
 }
-function stepDisplay(step: Step): string { return step.type === "hotkey" ? step.label : `Click zone ${step.zone}`; }
-function stepKey(step: Step): string { return step.type === "click" ? `Zone ${step.zone}` : formatBindingList(bindingsForAction(step.action)); }
+function stepDisplay(step: Step): string { return step.type === "hotkey" ? step.label : "Left click anywhere"; }
+function stepKey(step: Step): string {
+  if (step.type === "click") return "Click";
+  return formatBindingList(bindingsForAction(step.action)).split(" / ")[0]!;
+}
 
 function startPractice(): void {
   if (!profile || !hotkeyProfileReady() || missingActions(selectedDrill()).length > 0) return;
@@ -332,13 +333,13 @@ function startPractice(): void {
   app.querySelector<HTMLElement>("#practice-board")?.focus();
 }
 
-function sequenceStepNode(step: Step, index: number, current: Session): HTMLLIElement {
+function sequenceShortcutNode(step: Step, index: number, current: Session): HTMLLIElement {
   const state = index < current.stepIndex ? "complete" : index === current.stepIndex ? "active" : "pending";
-  const item = element("li", { className: `sequence-step sequence-step--${state}` });
+  const item = element("li", { className: `sequence-shortcut sequence-shortcut--${state}` });
   if (state === "active") item.setAttribute("aria-current", "step");
-  const marker = element("span", { className: "sequence-step__state", text: state === "complete" ? "✓" : state === "active" ? "→" : String(index + 1) }); marker.setAttribute("aria-hidden", "true");
-  const copy = element("span", { className: "sequence-step__copy" }); copy.append(element("strong", { text: stepDisplay(step) }), element("small", { text: step.tip || state }));
-  item.append(marker, copy, element("kbd", { text: stepKey(step) }));
+  item.setAttribute("aria-label", `${stepDisplay(step)}, ${state}`);
+  item.title = stepDisplay(step);
+  item.append(element("kbd", { text: stepKey(step) }));
   return item;
 }
 
@@ -355,44 +356,54 @@ function renderPractice(): void {
   practice.hidden = false;
 
   const shell = element("div", { className: "practice-shell" });
-  const topbar = element("div", { className: "practice-topbar" });
-  for (const [label, value, id] of [
-    ["Drill", current.drill.name, ""], ["Difficulty", DIFFICULTIES[current.difficultyIndex], ""], ["Completed", String(current.results.length), ""], ["Time left", formatClock(current.drill.totalTimeMs - getDrillElapsedMs(current, performance.now())), "drill-time"],
-  ]) {
-    const cell = element("div", { className: label === "Time left" ? "practice-topbar__clock" : "" });
-    cell.append(element("span", { text: label }), element("strong", { text: value, ...(id ? { id } : {}) })); topbar.append(cell);
-  }
-  shell.append(topbar);
-  const layout = element("div", { className: "practice-layout" });
+  const hud = element("header", { className: "practice-hud" });
+  const identity = element("div", { className: "practice-hud__identity" });
+  identity.append(
+    element("p", { className: "eyebrow", text: `Sequence ${current.currentSequenceIndex + 1} of ${current.drill.sequences.length} · ${DIFFICULTIES[current.difficultyIndex]}` }),
+    element("h1", { id: "sequence-title", text: current.currentSequence.name }),
+  );
+  const shortcutList = element("ol", { className: "sequence-shortcuts" });
+  shortcutList.setAttribute("aria-label", "Sequence shortcuts");
+  shortcutList.append(...current.currentSequence.steps.map((item, index) => sequenceShortcutNode(item, index, current)));
+  const metrics = element("div", { className: "practice-hud__metrics" });
+  const drillMetric = element("div");
+  drillMetric.append(element("span", { text: "Time left" }), element("strong", { id: "drill-time", text: formatClock(getDrillTargetTimeMs(current.drill, current.difficultyIndex) - getDrillElapsedMs(current, performance.now())) }));
+  const sequenceMetric = element("div");
+  sequenceMetric.append(element("span", { text: "Sequence" }), element("strong", { id: "sequence-time", text: formatDuration(getSequenceElapsedMs(current, performance.now())) }), element("small", { text: `/ ${formatDuration(targetMs)}` }));
+  metrics.append(drillMetric, sequenceMetric);
+  const actions = element("div", { className: "practice-actions" });
+  actions.append(button(current.status === "paused" ? "Resume" : "Pause", "button button--secondary", "pause-button"), button("Exit", "button button--text", "exit-button"));
+  hud.append(identity, shortcutList, metrics, actions);
+
   const board = element("section", { className: "practice-board", id: "practice-board" }); board.tabIndex = -1; board.setAttribute("aria-labelledby", "sequence-title");
-  const header = element("div", { className: "sequence-header" });
-  const heading = element("div"); heading.append(element("p", { className: "eyebrow", text: "Current sequence" }), element("h1", { id: "sequence-title", text: current.currentSequence.name }));
-  const timing = element("div", { className: "sequence-timing" });
-  const elapsed = element("span"); elapsed.append(element("b", { id: "sequence-time", text: formatDuration(getSequenceElapsedMs(current, performance.now())) }), document.createTextNode(" elapsed"));
-  const target = element("span"); target.append(element("b", { text: formatDuration(targetMs) }), document.createTextNode(" target")); timing.append(elapsed, target); header.append(heading, timing); board.append(header);
   const progress = element("progress", { className: "sequence-progress", id: "sequence-progress-bar" }); progress.max = 100; progress.value = 0; progress.setAttribute("aria-hidden", "true"); board.append(progress);
-  const list = element("ol", { className: "sequence-list" }); list.append(...current.currentSequence.steps.map((item, index) => sequenceStepNode(item, index, current))); board.append(list);
-  const clickSurface = element("div", { className: "click-surface" }); clickSurface.setAttribute("aria-label", "Building placement zones"); const grid = element("div", { className: "click-surface__grid" }); grid.setAttribute("aria-hidden", "true"); clickSurface.append(grid);
+  const panel = renderCommandPanel(current, bindingsForAction);
+  const clickSurface = element("div", { className: `click-surface${panel ? " click-surface--command-panel" : ""}` });
+  clickSurface.setAttribute("aria-label", "Practice map");
   const clickActive = step.type === "click";
-  CLICK_ZONES.forEach((zone) => { const targetZone = clickActive && zone.id === step.zone; const zoneButton = button("", `click-zone${targetZone ? " click-zone--target" : ""}`); zoneButton.dataset.zone = String(zone.id); zoneButton.disabled = !(clickActive && current.status === "running"); zoneButton.setAttribute("aria-label", `Click zone ${zone.id}${targetZone ? ", target zone" : ""}`); const mark = element("span", { className: "click-zone__x", text: "×" }); mark.setAttribute("aria-hidden", "true"); zoneButton.append(mark, element("span", { className: "click-zone__number", text: String(zone.id) })); clickSurface.append(zoneButton); });
+  if (clickActive) {
+    const clickTarget = button("", "click-anywhere-target", "click-anywhere-target");
+    clickTarget.disabled = current.status !== "running";
+    clickTarget.setAttribute("aria-label", "Left click anywhere to continue");
+    clickSurface.append(clickTarget);
+  }
+  clickSurface.append(renderSequenceTarget(current));
+  if (panel) clickSurface.append(panel);
+  const feedbackNode = element("p", { className: `input-feedback input-feedback--${feedback.kind}` }); feedbackNode.setAttribute("role", "status"); feedbackNode.setAttribute("aria-live", "polite"); const feedbackMark = element("span", { text: feedback.kind === "correct" ? "✓" : feedback.kind === "incorrect" ? "!" : "•" }); feedbackMark.setAttribute("aria-hidden", "true"); feedbackNode.append(feedbackMark, document.createTextNode(current.status === "paused" ? "Practice paused" : feedback.text));
+  clickSurface.append(feedbackNode);
   board.append(clickSurface);
-  const feedbackNode = element("p", { className: `input-feedback input-feedback--${feedback.kind}` }); feedbackNode.setAttribute("role", "status"); feedbackNode.setAttribute("aria-live", "polite"); const feedbackMark = element("span", { text: feedback.kind === "correct" ? "✓" : feedback.kind === "incorrect" ? "!" : "•" }); feedbackMark.setAttribute("aria-hidden", "true"); feedbackNode.append(feedbackMark, document.createTextNode(current.status === "paused" ? "Practice paused" : feedback.text)); board.append(feedbackNode);
-  const actions = element("div", { className: "practice-actions" }); actions.append(button(current.status === "paused" ? "Resume" : "Pause", "button button--secondary", "pause-button"), button("Exit session", "button button--text", "exit-button")); board.append(actions);
-  const mapping = element("aside", { className: "mapping-panel mapping-panel--practice" }); mapping.setAttribute("aria-labelledby", "practice-map-title"); const mapHeader = element("div", { className: "mapping-panel__header" }); const mapCopy = element("div"); mapCopy.append(element("p", { className: "eyebrow", text: "Quick reference" }), element("h2", { id: "practice-map-title", text: "Your hotkeys" })); mapHeader.append(mapCopy, element("span", { text: `${current.correctTries}/${current.totalTries}` })); mapping.append(mapHeader);
-  const stats = element("div", { className: "live-stats" }); for (const [label, value] of [["Accuracy", `${accuracy(current.correctTries, current.totalTries).toFixed(0)}%`], ["On target", `${current.results.filter((result) => result.metTarget).length}/${current.results.length}`]]) { const stat = element("div"); stat.append(element("span", { text: label }), element("strong", { text: value })); stats.append(stat); } mapping.append(stats); const mapList = element("ul", { className: "mapping-list mapping-list--compact" }); mapList.append(...mappingRows(current.drill)); mapping.append(mapList);
-  layout.append(board, mapping); shell.append(layout); practice.replaceChildren(shell);
+  shell.append(hud, board);
+  practice.replaceChildren(shell);
   app.querySelector<HTMLButtonElement>("#pause-button")?.addEventListener("click", () => { if (!session) return; session = togglePause(session, performance.now()); feedback = { kind: "neutral", text: "Waiting for your input…" }; renderPractice(); });
   app.querySelector<HTMLButtonElement>("#exit-button")?.addEventListener("click", () => { if (!session) return; session = exitSession(session); screen = "results"; renderResults(); });
-  app.querySelectorAll<HTMLButtonElement>("[data-zone]").forEach((item) => item.addEventListener("click", () => handleZoneAttempt(Number(item.dataset.zone))));
+  app.querySelector<HTMLButtonElement>("#click-anywhere-target")?.addEventListener("click", () => handleAttempt(true));
 }
-
-function handleZoneAttempt(zone: number): void { if (!session || session.status !== "running") return; const step = activeStep(session); if (step.type === "click") handleAttempt(zone === step.zone); }
 
 function handleAttempt(correct: boolean): void {
   if (!session || session.status !== "running") return;
-  const before = session; const step = activeStep(before); session = submitAttempt(before, correct, performance.now());
+  const before = session; session = submitAttempt(before, correct, performance.now());
   if (correct) feedback = session.results.length > before.results.length ? { kind: "correct", text: `Sequence complete in ${formatDuration(session.results.at(-1)?.elapsedMs ?? 0)}` } : { kind: "correct", text: "Correct. Next step." };
-  else feedback = step.onFailure === "restart_sequence" ? { kind: "incorrect", text: "Incorrect. Sequence restarted." } : { kind: "incorrect", text: "Incorrect. Try this step again." };
+  else feedback = { kind: "incorrect", text: "Incorrect. Try this step again." };
   if (session.status === "finished") { screen = "results"; renderResults(); } else renderPractice();
 }
 
@@ -432,13 +443,23 @@ window.addEventListener("keydown", (event) => {
   const step = activeStep(session); if (step.type === "hotkey") { event.preventDefault(); handleAttempt(bindingsForAction(step.action).some((binding) => eventMatchesBinding(event, binding))); }
 });
 
+window.addEventListener("wheel", (event) => {
+  if (screen !== "practice" || !session || session.status !== "running") return;
+  const step = activeStep(session);
+  if (step.type !== "hotkey") return;
+  const bindings = bindingsForAction(step.action);
+  if (!bindings.some(isWheelBinding)) return;
+  event.preventDefault();
+  handleAttempt(bindings.some((binding) => wheelEventMatchesBinding(event, binding)));
+}, { passive: false });
+
 function animationFrame(now: number): void {
   if (screen === "practice" && session) {
     const previous = session.status; session = tickSession(session, now);
     if (previous !== "finished" && session.status === "finished") { screen = "results"; renderResults(); }
     else if (session.status !== "finished") {
       const target = session.currentSequence.targetTimeMs[session.difficultyIndex] ?? 1; const elapsed = getSequenceElapsedMs(session, now);
-      const drillTime = app.querySelector<HTMLElement>("#drill-time"); if (drillTime) drillTime.textContent = formatClock(session.drill.totalTimeMs - getDrillElapsedMs(session, now));
+      const drillTime = app.querySelector<HTMLElement>("#drill-time"); if (drillTime) drillTime.textContent = formatClock(getDrillTargetTimeMs(session.drill, session.difficultyIndex) - getDrillElapsedMs(session, now));
       const sequenceTime = app.querySelector<HTMLElement>("#sequence-time"); if (sequenceTime) sequenceTime.textContent = formatDuration(elapsed);
       const progress = app.querySelector<HTMLProgressElement>("#sequence-progress-bar"); if (progress) progress.value = Math.min(100, (elapsed / target) * 100);
     }

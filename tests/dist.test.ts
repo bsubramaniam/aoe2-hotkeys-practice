@@ -3,6 +3,7 @@ import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { containsHtmlTemplateLiteral, validateDist } from "../scripts/validate-dist.mjs";
+import { BUILTIN_COMMAND_PANELS } from "../src/builtin-command-panels";
 
 const distDirectory = resolve("dist");
 const sourceDirectory = resolve("src");
@@ -42,15 +43,23 @@ describe("generated Cloudflare artifact", () => {
 
   it("emits distinct authored documents instead of copied application shells", () => {
     const pages = pagePaths.map(readDist);
+    const home = readDist("index.html");
+    const drills = readDist("drills.html");
 
     expect(new Set(pages).size).toBe(pagePaths.length);
     expect(pages.every((page) => !page.includes('<div id="app"></div>'))).toBe(true);
-    expect(readDist("index.html")).toContain('id="page-title"');
+    expect(home).toContain('id="page-title"');
     expect(readDist("404.html")).toContain('id="not-found-title"');
-    expect(readDist("drills.html")).toContain('id="drills-title"');
+    expect(drills).toContain('id="drills-title"');
     expect(readDist("drills/create.html")).toContain('id="create-drill-title"');
     expect(readDist("drills/edit.html")).toContain('id="edit-drill-title"');
     expect(readDist("privacy.html")).toContain("Privacy &amp; Beta Terms");
+    expect(home).toContain('<option value="1">Standard</option>');
+    expect(home).toContain('<strong id="drill-duration">1:29</strong>');
+    expect(drills).toContain("confirm it with a left click");
+    expect(drills).toContain("<dt>Moderate duration</dt><dd>1:29</dd>");
+    expect(drills).toContain("hotkeys and left clicks");
+    expect(drills).not.toMatch(/marked zone|click zones/i);
   });
 
   it("keeps Cloudflare output flat without folder-index fallbacks", () => {
@@ -176,6 +185,19 @@ describe("generated Cloudflare artifact", () => {
   it("ships the required runtime dependency notice", () => {
     const notices = readDist("THIRD_PARTY_NOTICES.txt");
 
+    for (const panel of [
+      "villager-command-panel.png",
+      "economic-buildings-panel.png",
+      "military-buildings-panel.png",
+      ...BUILTIN_COMMAND_PANELS.map((definition) => definition.asset),
+    ]) {
+      expect(existsSync(join(distDirectory, "assets", "microsoft-game-content", panel)), panel).toBe(true);
+    }
+    expect(notices).toContain("assets/microsoft-game-content/");
+    expect(notices).toContain("Game Content Usage Rules");
+    expect(notices).toContain("must comply with");
+    expect(notices).toContain("remove and replace the files");
+    expect(notices).toMatch(/not endorsed by or\s+affiliated with Microsoft/);
     expect(notices).toContain("fflate 0.8.3");
     expect(notices).toContain("Copyright (c) 2026 Arjun Barrett");
     expect(notices).toContain("MIT License");
@@ -186,13 +208,20 @@ describe("generated Cloudflare artifact", () => {
     const visibleText = privacy.replace(/<[^>]+>/g, " ");
 
     expect(privacy).not.toMatch(/<script\b/i);
+    expect(privacy).toContain("Last updated: 24 July 2026");
     expect(privacy).toContain("Only custom drills are stored persistently");
+    expect(privacy).toContain("browser-local drill ID");
+    expect(privacy).toContain("derived from its name");
     expect(privacy).toContain("does not use cookies or local storage for analytics");
-    expect(privacy).toContain("does not track individual visitors");
-    expect(privacy).toContain("does not collect or use visitors' personal data");
+    expect(privacy).toContain("does not fingerprint individuals for analytics");
+    expect(privacy).toContain("strictly necessary security cookies");
+    expect(privacy).toContain("does not transmit the contents of your hotkey files");
     expect(privacy).toContain("Use of the trainer and imported drill files is at your own risk.");
-    expect(privacy).not.toContain("Game Content Usage Rules");
-    expect(privacy.match(/not endorsed by or affiliated with/g)).toHaveLength(1);
+    expect(privacy).toContain("Game Content Usage Rules");
+    expect(privacy).toContain("https://www.xbox.com/en-us/developers/rules");
+    expect(privacy).toContain("MIT License does not cover the cropped Microsoft game content");
+    expect(privacy).toContain("must comply with Microsoft");
+    expect(privacy.match(/not endorsed by or affiliated with/g)).toHaveLength(2);
     expect(visibleText).not.toContain("vejak.app@gmail.com");
     expect(privacy).toContain("mailto:vejak.app@gmail.com");
   });
