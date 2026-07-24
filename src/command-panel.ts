@@ -1,19 +1,22 @@
 import { formatBinding, type HotkeyBinding } from "./hotkey-file";
 import {
-  BUILTIN_COMMAND_PANEL_BY_DRILL_ID,
-  type BuiltinCommandPanelDefinition,
+  BUILTIN_COMMAND_PANEL_BY_ID,
   type BuiltinCommandPanelEntry,
 } from "./builtin-command-panels";
-import type { Sequence, Session, Step } from "./types";
+import {
+  contextAfterAction,
+  contextForStartingSelection,
+  type CommandContextId,
+} from "./selection-context";
+import type { Sequence, Session } from "./types";
 
-export type CommandPanelMenu = "economic" | "military" | BuiltinCommandPanelDefinition["id"];
 export type CommandPanelEntry = BuiltinCommandPanelEntry;
 
 export interface CommandPanelState {
   activeAction: string | null;
   entries: readonly CommandPanelEntry[];
   label: string;
-  menu: "none" | "villager" | CommandPanelMenu;
+  menu: CommandContextId;
 }
 
 export interface SequenceTargetState {
@@ -27,7 +30,6 @@ const GAME_CONTENT_ASSET_ROOT = "/assets/microsoft-game-content";
 const VILLAGER_PANEL_ASSET = "villager-command-panel.png";
 const ECONOMIC_PANEL_ASSET = "economic-buildings-panel.png";
 const MILITARY_PANEL_ASSET = "military-buildings-panel.png";
-const VILLAGER_BUILDING_DRILL_IDS = new Set(["villager-building-placement", "quick-walling"]);
 
 const ROOT_ENTRIES: readonly CommandPanelEntry[] = [
   { action: "open_economic_buildings", label: "Economic Buildings", slot: 0 },
@@ -61,133 +63,119 @@ const MILITARY_ENTRIES: readonly CommandPanelEntry[] = [
   { action: "build_castle", label: "Castle", slot: 12 },
 ];
 
-const buildEntryByAction = new Map(
-  [...ECONOMIC_ENTRIES, ...MILITARY_ENTRIES].map((entry) => [entry.action, entry]),
-);
-
-function lastHotkeyEntry(
-  sequence: Sequence,
-  entries: readonly CommandPanelEntry[],
-): CommandPanelEntry | undefined {
-  for (let index = sequence.steps.length - 1; index >= 0; index -= 1) {
-    const step = sequence.steps[index];
-    if (step?.type !== "hotkey") continue;
-    const entry = entries.find((candidate) => candidate.action === step.action);
-    if (entry) return entry;
-  }
-  return undefined;
+interface ContextDefinition {
+  asset?: string;
+  category: string;
+  entries: readonly CommandPanelEntry[];
+  label: string;
 }
 
-function buildActionBefore(sequence: Sequence, stepIndex: number): string | null {
-  for (let index = stepIndex; index >= 0; index -= 1) {
-    const step = sequence.steps[index];
-    if (step?.type === "hotkey" && buildEntryByAction.has(step.action)) return step.action;
-  }
-  return null;
-}
-
-function panelActionBefore(
-  panel: BuiltinCommandPanelDefinition,
-  sequence: Sequence,
-  stepIndex: number,
-): string | null {
-  for (let index = stepIndex; index >= 0; index -= 1) {
-    const step = sequence.steps[index];
-    if (step?.type === "hotkey" && panel.entries.some((entry) => entry.action === step.action)) {
-      return step.action;
-    }
-  }
-  return null;
-}
-
-export function commandPanelState(
-  drillId: string,
-  sequence: Sequence,
-  stepIndex: number,
-): CommandPanelState | null {
-  const step: Step | undefined = sequence.steps[stepIndex];
-  if (!step) return null;
-
-  const capturedPanel = BUILTIN_COMMAND_PANEL_BY_DRILL_ID.get(drillId);
-  if (capturedPanel) {
-    const activeAction = panelActionBefore(capturedPanel, sequence, stepIndex);
-    if (!activeAction) return null;
+function contextDefinition(context: CommandContextId): ContextDefinition | null {
+  if (context === "none") {
     return {
-      activeAction,
-      entries: capturedPanel.entries,
-      label: capturedPanel.name,
-      menu: capturedPanel.id,
+      category: "No unit selected",
+      entries: [],
+      label: "No unit selected",
     };
   }
-
-  if (!VILLAGER_BUILDING_DRILL_IDS.has(drillId)) return null;
-  if (step.type === "hotkey" && step.action === "select_villager") {
-    return { activeAction: null, entries: [], label: "No unit selected", menu: "none" };
-  }
-  if (step.type === "hotkey" && ROOT_ENTRIES.some((entry) => entry.action === step.action)) {
+  if (context === "villager") {
     return {
-      activeAction: step.action,
+      asset: VILLAGER_PANEL_ASSET,
+      category: "Villager commands",
       entries: ROOT_ENTRIES,
       label: "Villager commands",
-      menu: "villager",
     };
   }
+  if (context === "economic") {
+    return {
+      asset: ECONOMIC_PANEL_ASSET,
+      category: "Economic building",
+      entries: ECONOMIC_ENTRIES,
+      label: "Economic buildings",
+    };
+  }
+  if (context === "military") {
+    return {
+      asset: MILITARY_PANEL_ASSET,
+      category: "Military building",
+      entries: MILITARY_ENTRIES,
+      label: "Military buildings",
+    };
+  }
+  const panel = BUILTIN_COMMAND_PANEL_BY_ID.get(context);
+  return panel
+    ? {
+        asset: panel.asset,
+        category: panel.name,
+        entries: panel.entries,
+        label: panel.name,
+      }
+    : null;
+}
 
-  const buildAction = buildActionBefore(sequence, stepIndex);
-  const entry = buildAction ? buildEntryByAction.get(buildAction) : undefined;
-  if (!entry) return null;
-  const menu: CommandPanelMenu = ECONOMIC_ENTRIES.includes(entry) ? "economic" : "military";
+function entryForAction(
+  definition: ContextDefinition | null,
+  action: string,
+): CommandPanelEntry | undefined {
+  return definition?.entries.find((entry) => entry.action === action);
+}
+
+export function commandPanelState(sequence: Sequence, stepIndex: number): CommandPanelState | null {
+  const step = sequence.steps[stepIndex];
+  if (!step) return null;
+
+  let context = contextForStartingSelection(sequence.startingSelection);
+  let lastPanelAction: string | null = null;
+  for (let index = 0; index < stepIndex; index += 1) {
+    const completedStep = sequence.steps[index];
+    if (completedStep?.type !== "hotkey") continue;
+    const definition = contextDefinition(context);
+    lastPanelAction = entryForAction(definition, completedStep.action)?.action ?? lastPanelAction;
+    const nextContext = contextAfterAction(context, completedStep.action);
+    if (nextContext !== context) {
+      context = nextContext;
+      lastPanelAction = null;
+    }
+  }
+
+  const definition = contextDefinition(context);
+  if (!definition) return null;
+  const activeEntry = step.type === "hotkey"
+    ? entryForAction(definition, step.action)
+    : undefined;
+  if (context === "none") {
+    const changesSelection = step.type === "hotkey"
+      && contextAfterAction(context, step.action) !== context;
+    if (!changesSelection) return null;
+  }
   return {
-    activeAction: buildAction,
-    entries: menu === "economic" ? ECONOMIC_ENTRIES : MILITARY_ENTRIES,
-    label: menu === "economic" ? "Economic buildings" : "Military buildings",
-    menu,
+    activeAction: activeEntry?.action ?? (step.type === "click" ? lastPanelAction : null),
+    entries: definition.entries,
+    label: definition.label,
+    menu: context,
   };
 }
 
-export function sequenceTargetState(
-  drillId: string,
-  sequence: Sequence,
-): SequenceTargetState | null {
-  const capturedPanel = BUILTIN_COMMAND_PANEL_BY_DRILL_ID.get(drillId);
-  if (capturedPanel) {
-    const entry = lastHotkeyEntry(sequence, capturedPanel.entries);
-    return entry
-      ? { asset: capturedPanel.asset, category: capturedPanel.name, label: entry.label, slot: entry.slot }
-      : null;
-  }
-
-  const buildEntry = lastHotkeyEntry(sequence, [...ECONOMIC_ENTRIES, ...MILITARY_ENTRIES]);
-  if (buildEntry) {
-    const economic = ECONOMIC_ENTRIES.includes(buildEntry);
-    return {
-      asset: economic ? ECONOMIC_PANEL_ASSET : MILITARY_PANEL_ASSET,
-      category: economic ? "Economic building" : "Military building",
-      label: buildEntry.label,
-      slot: buildEntry.slot,
-    };
-  }
-
-  for (let index = sequence.steps.length - 1; index >= 0; index -= 1) {
-    const step = sequence.steps[index];
-    if (step?.type !== "hotkey") continue;
-    for (const panel of BUILTIN_COMMAND_PANEL_BY_DRILL_ID.values()) {
-      const entry = panel.entries.find((candidate) => candidate.action === step.action);
-      if (entry) {
-        return { asset: panel.asset, category: panel.name, label: entry.label, slot: entry.slot };
-      }
+export function sequenceTargetState(sequence: Sequence): SequenceTargetState | null {
+  let context = contextForStartingSelection(sequence.startingSelection);
+  let target: SequenceTargetState | null = null;
+  for (const step of sequence.steps) {
+    if (step.type !== "hotkey") continue;
+    const definition = contextDefinition(context);
+    const entry = entryForAction(definition, step.action);
+    if (entry && definition?.asset) {
+      target = {
+        asset: definition.asset,
+        category: definition.category,
+        label: entry.label,
+        slot: entry.slot,
+      };
     }
+    const nextContext = contextAfterAction(context, step.action);
+    if (nextContext !== context && !entry) target = null;
+    context = nextContext;
   }
-
-  const rootEntry = lastHotkeyEntry(sequence, ROOT_ENTRIES);
-  return rootEntry
-    ? {
-        asset: VILLAGER_PANEL_ASSET,
-        category: "Villager commands",
-        label: rootEntry.label,
-        slot: rootEntry.slot,
-      }
-    : null;
+  return target;
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(
@@ -201,7 +189,7 @@ function element<K extends keyof HTMLElementTagNameMap>(
 }
 
 export function renderSequenceTarget(current: Session): HTMLElement {
-  const state = sequenceTargetState(current.drill.id, current.currentSequence);
+  const state = sequenceTargetState(current.currentSequence);
   const target = element("div", { className: "sequence-target" });
   target.setAttribute("aria-label", `Target: ${current.currentSequence.name}`);
   target.append(element("span", {
@@ -238,7 +226,6 @@ export function renderCommandPanel(
   bindingsForAction: (actionId: string) => HotkeyBinding[],
 ): HTMLElement | null {
   const state = commandPanelState(
-    current.drill.id,
     current.currentSequence,
     current.stepIndex,
   );

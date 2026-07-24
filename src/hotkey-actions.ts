@@ -558,10 +558,63 @@ function actionId(stringId: number): string {
   return legacyActionIds.get(stringId) ?? `hotkey_${stringId}`;
 }
 
+// Contexts for labels that are intentionally repeated by the game in
+// resources/_common/dat/hotkeys.json. Keep this list paired with the
+// case-insensitive uniqueness test whenever the game catalogue is refreshed.
+const ambiguousActionContexts = new Map<number, string>([
+  [19034, "Barracks"],
+  [19167, "Donjon"],
+  [19168, "Settlement"],
+  [19043, "Archery Range"],
+  [19179, "Settlement"],
+  [19045, "Dock"],
+  [419011, "Port"],
+  [19085, "Castle"],
+  [19181, "Fort"],
+  [19086, "Castle"],
+  [19182, "Fort"],
+  [19087, "Mouse wheel"],
+  [19089, "Keyboard"],
+  [19088, "Mouse wheel"],
+  [19090, "Keyboard"],
+  [19101, "Dock"],
+  [19183, "Port"],
+  [19123, "Dock"],
+  [19184, "Port"],
+  [19130, "Castle"],
+  [19185, "Fort"],
+  [19284, "Dock"],
+  [419013, "Port"],
+  [19322, "Castle"],
+  [19187, "Donjon"],
+  [19337, "Mill"],
+  [19169, "Settlement"],
+  [19338, "Mining Camp"],
+  [19170, "Mule Cart"],
+  [19171, "Settlement"],
+  [19339, "Mining Camp"],
+  [19172, "Mule Cart"],
+  [19173, "Settlement"],
+  [19340, "Lumber Camp"],
+  [19174, "Mule Cart"],
+  [19175, "Settlement"],
+  [19343, "Dock"],
+  [419018, "Port"],
+  [19452, "Barracks"],
+  [19188, "Settlement"],
+  [19459, "Archery Range"],
+  [19189, "Settlement"],
+]);
+
+function actionLabel(stringId: number, label: string): string {
+  const context = ambiguousActionContexts.get(stringId);
+  return context ? `${label} — ${context}` : label;
+}
+
 const actionByStringId = new Map<number, HotkeyActionDefinition>(
   [...new Map([...actionData, ...CURRENT_HOTKEY_LABELS])].map(([stringId, label]) => [
     stringId,
-    { id: actionId(stringId), label, stringId },
+    { id: actionId(stringId), label: actionLabel(stringId, label), stringId },
   ]),
 );
 
@@ -590,7 +643,5 @@ export function actionsForStringIds(stringIds: Iterable<number>): HotkeyActionDe
       });
     }
   }
-  return [...actions.values()].sort((left, right) =>
-    left.label.localeCompare(right.label) || left.stringId - right.stringId
-  );
+  return [...actions.values()].sort((left, right) => left.label.localeCompare(right.label));
 }

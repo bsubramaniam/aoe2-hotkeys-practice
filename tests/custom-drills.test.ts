@@ -18,15 +18,15 @@ function validDrillFile(): Record<string, unknown> {
     schemaVersion: 2,
     name: "Mining Camp Practice",
     description: "Practice placing a mining camp.",
-    totalTimeMs: 60_000,
     sequences: [{
       id: "mining-camp",
       name: "Mining Camp",
+      startingSelection: { type: "unit", id: "villager" },
       targetTimeMs: [6500, 5200, 4200, 3300, 2600, 2000, 1500],
       sequence: [
-        { type: "hotkey", action: "open_economic_buildings", onFailure: "wait", tip: "Open the build menu." },
-        { type: "hotkey", action: "build_mining_camp", onFailure: "restart_sequence" },
-        { type: "click", onFailure: "wait" },
+        { type: "hotkey", action: "open_economic_buildings", tip: "Open the build menu." },
+        { type: "hotkey", action: "build_mining_camp" },
+        { type: "click" },
       ],
     }],
   };
@@ -42,6 +42,7 @@ describe("custom drill files", () => {
       action: "open_economic_buildings",
       tip: "Open the build menu.",
     });
+    expect(drill.sequences[0]?.startingSelection).toEqual({ type: "unit", id: "villager" });
   });
 
   it("rejects portable drill files containing a top-level ID", () => {
@@ -61,7 +62,7 @@ describe("custom drill files", () => {
     const sequences = file.sequences as Array<Record<string, unknown>>;
     const sequence = sequences[0];
     if (!sequence) throw new Error("Fixture sequence is missing.");
-    sequence.sequence = [{ type: "hotkey", action: "unknown_action", onFailure: "wait" }];
+    sequence.sequence = [{ type: "hotkey", action: "unknown_action" }];
 
     expect(() => parseCustomDrill(file)).toThrow("action is not supported");
   });
@@ -73,6 +74,7 @@ describe("custom drill files", () => {
     expect(serialized.schemaVersion).toBe(2);
     expect(serialized).not.toHaveProperty("id");
     expect(serialized.sequences[0]?.sequence).toHaveLength(3);
+    expect(serialized.sequences[0]?.startingSelection).toEqual({ type: "unit", id: "villager" });
     expect(() => parseCustomDrill(serialized)).not.toThrow();
   });
 
@@ -82,8 +84,8 @@ describe("custom drill files", () => {
     const sequence = (file.sequences as Array<Record<string, unknown>>)[0];
     if (!sequence) throw new Error("Fixture sequence is missing.");
     sequence.sequence = [
-      { type: "click", onFailure: "wait", tip: "   " },
-      { type: "click", onFailure: "wait", tip: "Use the center." },
+      { type: "click", tip: "   " },
+      { type: "click", tip: "Use the center." },
     ];
 
     const parsed = parseCustomDrill(file);
@@ -96,14 +98,14 @@ describe("custom drill files", () => {
       sequences: [{
         ...parsed.sequences[0]!,
         steps: [
-          { type: "click", label: "Anywhere", onFailure: "wait", tip: "Anywhere" },
-          { type: "click", label: "Anywhere", onFailure: "wait" },
+          { type: "click", label: "Anywhere", tip: "Anywhere" },
+          { type: "click", label: "Anywhere" },
         ],
       }],
     });
     expect(serialized.sequences[0]?.sequence).toEqual([
-      { type: "click", onFailure: "wait", tip: "Anywhere" },
-      { type: "click", onFailure: "wait" },
+      { type: "click", tip: "Anywhere" },
+      { type: "click" },
     ]);
 
     const storage = new MemoryStorage();
@@ -188,7 +190,7 @@ describe("custom drill files", () => {
       [null, "JSON object"],
       [{}, "schemaVersion"],
       [{ ...validDrillFile(), schemaVersion: 1 }, "schemaVersion must be 2"],
-      [{ schemaVersion: 2, totalTimeMs: 0 }, "positive integer"],
+      [{ ...validDrillFile(), totalTimeMs: 60_000 }, "totalTimeMs is not supported"],
       [{ ...validDrillFile(), sequences: [] }, "at least one sequence"],
       [{ ...validDrillFile(), sequences: [null] }, "must be an object"],
     ];
@@ -204,11 +206,16 @@ describe("custom drill files", () => {
     expect(() => parseCustomDrill(mutateSequence({ targetTimeMs: [1] }))).toThrow("exactly seven");
     expect(() => parseCustomDrill(mutateSequence({ targetTimeMs: [1, 1, 1, 1, 1, 1, 0] }))).toThrow("positive integer");
     expect(() => parseCustomDrill(mutateSequence({ sequence: [] }))).toThrow("at least one step");
+    expect(() => parseCustomDrill(mutateSequence({ startingSelection: null }))).toThrow("must be an object");
+    expect(() => parseCustomDrill(mutateSequence({ startingSelection: { type: "none", id: "villager" } }))).toThrow("not supported");
+    expect(() => parseCustomDrill(mutateSequence({ startingSelection: { type: "building", id: "house" } }))).toThrow("supported building");
+    expect(() => parseCustomDrill(mutateSequence({ startingSelection: { type: "unit", id: "ship" } }))).toThrow("supported unit");
+    expect(() => parseCustomDrill(mutateSequence({ startingSelection: { type: "group" } }))).toThrow("type must be");
     expect(() => parseCustomDrill(mutateSequence({ sequence: [null] }))).toThrow("must be an object");
-    expect(() => parseCustomDrill(mutateSequence({ sequence: [{ type: "click", onFailure: "stop" }] }))).toThrow("onFailure");
-    expect(() => parseCustomDrill(mutateSequence({ sequence: [{ type: "click", onFailure: "wait", tip: 4 }] }))).toThrow("tip");
-    expect(() => parseCustomDrill(mutateSequence({ sequence: [{ type: "click", zone: 1, onFailure: "wait" }] }))).toThrow("zone is not supported");
-    expect(() => parseCustomDrill(mutateSequence({ sequence: [{ type: "other", onFailure: "wait" }] }))).toThrow("type");
+    expect(() => parseCustomDrill(mutateSequence({ sequence: [{ type: "click", onFailure: "wait" }] }))).toThrow("onFailure is not supported");
+    expect(() => parseCustomDrill(mutateSequence({ sequence: [{ type: "click", tip: 4 }] }))).toThrow("tip");
+    expect(() => parseCustomDrill(mutateSequence({ sequence: [{ type: "click", zone: 1 }] }))).toThrow("zone is not supported");
+    expect(() => parseCustomDrill(mutateSequence({ sequence: [{ type: "other" }] }))).toThrow("type");
     expect(() => parseCustomDrill(mutateSequence({ id: "" }))).toThrow("non-empty string");
 
     const duplicate = validDrillFile();

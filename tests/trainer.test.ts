@@ -1,26 +1,26 @@
 import { describe, expect, it } from "vitest";
 
-import { createSession, exitSession, getSequenceElapsedMs, submitAttempt, tickSession, togglePause } from "../src/trainer";
+import { createSession, exitSession, getDrillTargetTimeMs, getSequenceElapsedMs, submitAttempt, tickSession, togglePause } from "../src/trainer";
 import type { Drill } from "../src/types";
 
 const drill: Drill = {
   id: "test-drill",
   name: "Test drill",
   description: "Test",
-  totalTimeMs: 10_000,
   sequences: [{
     id: "test-sequence",
     name: "Test sequence",
+    startingSelection: { type: "none" },
     targetTimeMs: [5_000, 4_000, 3_000, 2_500, 2_000, 1_500, 1_000],
     steps: [
-      { type: "hotkey", action: "first", label: "First", onFailure: "wait" },
-      { type: "hotkey", action: "second", label: "Second", onFailure: "restart_sequence" },
+      { type: "hotkey", action: "first", label: "First" },
+      { type: "hotkey", action: "second", label: "Second" },
     ],
   }],
 };
 
 describe("trainer session", () => {
-  it("waits on the same step when wait handling fails", () => {
+  it("waits on the same step after an incorrect input", () => {
     const session = createSession(drill, 2, 0);
     const failed = submitAttempt(session, false, 500);
 
@@ -29,13 +29,13 @@ describe("trainer session", () => {
     expect(failed.correctTries).toBe(0);
   });
 
-  it("restarts the sequence after a restart_sequence failure", () => {
+  it("keeps the current later step after an incorrect input", () => {
     let session = createSession(drill, 2, 0);
     session = submitAttempt(session, true, 300);
     expect(session.stepIndex).toBe(1);
 
     session = submitAttempt(session, false, 700);
-    expect(session.stepIndex).toBe(0);
+    expect(session.stepIndex).toBe(1);
     expect(session.totalTries).toBe(2);
   });
 
@@ -80,8 +80,22 @@ describe("trainer session", () => {
     session = togglePause(session, 4_000);
 
     expect(getSequenceElapsedMs(session, 5_000)).toBe(2_000);
-    expect(tickSession(session, 12_000).status).toBe("running");
-    expect(tickSession(session, 13_000).status).toBe("finished");
+    expect(tickSession(session, 5_999).status).toBe("running");
+    expect(tickSession(session, 6_000).status).toBe("finished");
+  });
+
+  it("calculates total drill time by summing sequence targets at the selected difficulty", () => {
+    const repeated = {
+      ...drill,
+      sequences: [
+        drill.sequences[0]!,
+        { ...drill.sequences[0]!, id: "second" },
+      ],
+    };
+
+    expect(getDrillTargetTimeMs(repeated, 0)).toBe(10_000);
+    expect(getDrillTargetTimeMs(repeated, 6)).toBe(2_000);
+    expect(() => getDrillTargetTimeMs(repeated, 99)).toThrow("no target time");
   });
 
   it("covers finished, idle, invalid, and click-label normalization branches", () => {
@@ -105,13 +119,12 @@ describe("trainer session", () => {
       ...drill,
       sequences: [{
         ...drill.sequences[0]!,
-        steps: [{ type: "click", label: "Confirm", onFailure: "wait" }],
+        steps: [{ type: "click", label: "Confirm" }],
       }],
     };
     expect(createSession(clickDrill, 0, 0).currentSequence.steps[0]).toEqual({
       type: "click",
       label: "Left click anywhere",
-      onFailure: "wait",
     });
   });
 });

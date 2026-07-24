@@ -5,7 +5,7 @@ import { mountDrillBuilder } from "./drill-builder";
 import { BUILTIN_DRILLS, getRequiredActions } from "./drills";
 import { actionsForStringIds, getHotkeyAction } from "./hotkey-actions";
 import { eventMatchesBinding, formatBinding, isModifierOnly, isWheelBinding, MAX_HOTKEY_FILE_BYTES, MAX_HOTKEY_FILES, parseHotkeyFiles, wheelEventMatchesBinding, type HotkeyBinding, type HotkeyProfile, type NamedBuffer } from "./hotkey-file";
-import { createSession, exitSession, getDrillElapsedMs, getSequenceElapsedMs, submitAttempt, tickSession, togglePause } from "./trainer";
+import { createSession, exitSession, getDrillElapsedMs, getDrillTargetTimeMs, getSequenceElapsedMs, submitAttempt, tickSession, togglePause } from "./trainer";
 import { DIFFICULTIES, type Drill, type Session, type Step } from "./types";
 
 type Screen = "setup" | "drills" | "builder" | "practice" | "results";
@@ -127,7 +127,7 @@ function renderSetup(): void {
   difficultySelect.value = String(selectedDifficultyIndex);
   const duration = app.querySelector<HTMLElement>("#drill-duration");
   const sequences = app.querySelector<HTMLElement>("#drill-sequences");
-  if (duration) duration.textContent = formatClock(drill.totalTimeMs);
+  if (duration) duration.textContent = formatClock(getDrillTargetTimeMs(drill, selectedDifficultyIndex));
   if (sequences) sequences.textContent = String(drill.sequences.length);
 
   const warning = app.querySelector<HTMLElement>("#mapping-warning");
@@ -196,7 +196,7 @@ function drillCard(drill: Drill, index: number): HTMLElement {
   const titleRow = element("div", { className: "drill-card__title-row" });
   titleRow.append(element("h3", { text: drill.name }), element("span", { className: `status-pill${isCustom ? " status-pill--custom" : ""}`, text: isCustom ? "Custom" : "Built-in" }));
   const metadata = element("dl", { className: "drill-card__meta" });
-  for (const [term, value] of [["Duration", formatClock(drill.totalTimeMs)], ["Sequences", String(drill.sequences.length)]]) {
+  for (const [term, value] of [[`${DIFFICULTIES[selectedDifficultyIndex]} duration`, formatClock(getDrillTargetTimeMs(drill, selectedDifficultyIndex))], ["Sequences", String(drill.sequences.length)]]) {
     const item = element("div"); item.append(element("dt", { text: term }), element("dd", { text: value })); metadata.append(item);
   }
   select.append(titleRow, element("p", { text: drill.description }), metadata);
@@ -367,7 +367,7 @@ function renderPractice(): void {
   shortcutList.append(...current.currentSequence.steps.map((item, index) => sequenceShortcutNode(item, index, current)));
   const metrics = element("div", { className: "practice-hud__metrics" });
   const drillMetric = element("div");
-  drillMetric.append(element("span", { text: "Time left" }), element("strong", { id: "drill-time", text: formatClock(current.drill.totalTimeMs - getDrillElapsedMs(current, performance.now())) }));
+  drillMetric.append(element("span", { text: "Time left" }), element("strong", { id: "drill-time", text: formatClock(getDrillTargetTimeMs(current.drill, current.difficultyIndex) - getDrillElapsedMs(current, performance.now())) }));
   const sequenceMetric = element("div");
   sequenceMetric.append(element("span", { text: "Sequence" }), element("strong", { id: "sequence-time", text: formatDuration(getSequenceElapsedMs(current, performance.now())) }), element("small", { text: `/ ${formatDuration(targetMs)}` }));
   metrics.append(drillMetric, sequenceMetric);
@@ -401,9 +401,9 @@ function renderPractice(): void {
 
 function handleAttempt(correct: boolean): void {
   if (!session || session.status !== "running") return;
-  const before = session; const step = activeStep(before); session = submitAttempt(before, correct, performance.now());
+  const before = session; session = submitAttempt(before, correct, performance.now());
   if (correct) feedback = session.results.length > before.results.length ? { kind: "correct", text: `Sequence complete in ${formatDuration(session.results.at(-1)?.elapsedMs ?? 0)}` } : { kind: "correct", text: "Correct. Next step." };
-  else feedback = step.onFailure === "restart_sequence" ? { kind: "incorrect", text: "Incorrect. Sequence restarted." } : { kind: "incorrect", text: "Incorrect. Try this step again." };
+  else feedback = { kind: "incorrect", text: "Incorrect. Try this step again." };
   if (session.status === "finished") { screen = "results"; renderResults(); } else renderPractice();
 }
 
@@ -459,7 +459,7 @@ function animationFrame(now: number): void {
     if (previous !== "finished" && session.status === "finished") { screen = "results"; renderResults(); }
     else if (session.status !== "finished") {
       const target = session.currentSequence.targetTimeMs[session.difficultyIndex] ?? 1; const elapsed = getSequenceElapsedMs(session, now);
-      const drillTime = app.querySelector<HTMLElement>("#drill-time"); if (drillTime) drillTime.textContent = formatClock(session.drill.totalTimeMs - getDrillElapsedMs(session, now));
+      const drillTime = app.querySelector<HTMLElement>("#drill-time"); if (drillTime) drillTime.textContent = formatClock(getDrillTargetTimeMs(session.drill, session.difficultyIndex) - getDrillElapsedMs(session, now));
       const sequenceTime = app.querySelector<HTMLElement>("#sequence-time"); if (sequenceTime) sequenceTime.textContent = formatDuration(elapsed);
       const progress = app.querySelector<HTMLProgressElement>("#sequence-progress-bar"); if (progress) progress.value = Math.min(100, (elapsed / target) * 100);
     }

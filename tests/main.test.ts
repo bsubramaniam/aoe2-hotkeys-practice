@@ -20,40 +20,47 @@ function customDrill(id: string, step: Record<string, unknown>): Record<string, 
     id,
     name: `${id} name`,
     description: `${id} description`,
-    totalTimeMs: 60_000,
-    sequences: [{ id: `${id}-sequence`, name: `${id} sequence`, targetTimeMs: targetTimes, sequence: [step] }],
+    sequences: [{
+      id: `${id}-sequence`,
+      name: `${id} sequence`,
+      startingSelection: { type: "none" },
+      targetTimeMs: targetTimes,
+      sequence: [step],
+    }],
   };
 }
 
-const clickDrill = customDrill("click-drill", { type: "click", onFailure: "wait" });
-const hotkeyDrill = customDrill("hotkey-drill", { type: "hotkey", action: "select_villager", onFailure: "wait" });
+const clickDrill = customDrill("click-drill", { type: "click" });
+const hotkeyDrill = customDrill("hotkey-drill", { type: "hotkey", action: "select_villager" });
 const branchingDrill = {
   schemaVersion: 2,
   id: "branching-drill",
   name: "Branching drill",
   description: "Exercises multi-step practice feedback.",
-  totalTimeMs: 60_000,
   sequences: [
     {
       id: "multi-step",
       name: "Multi-step",
+      startingSelection: { type: "none" },
       targetTimeMs: [60_000, 60_000, 60_000, 60_000, 60_000, 60_000, 60_000],
       sequence: [
-        { type: "click", tip: "First", onFailure: "wait" },
-        { type: "hotkey", action: "select_villager", onFailure: "restart_sequence" },
+        { type: "click", tip: "First" },
+        { type: "hotkey", action: "select_villager" },
       ],
     },
     {
       id: "over-target",
       name: "Over target",
+      startingSelection: { type: "none" },
       targetTimeMs: [1, 1, 1, 1, 1, 1, 1],
-      sequence: [{ type: "click", onFailure: "wait" }],
+      sequence: [{ type: "click" }],
     },
     {
       id: "not-completed",
       name: "Not completed",
+      startingSelection: { type: "none" },
       targetTimeMs: targetTimes,
-      sequence: [{ type: "click", onFailure: "wait" }],
+      sequence: [{ type: "click" }],
     },
   ],
 };
@@ -146,8 +153,10 @@ describe("application pages", () => {
     expect(document.body.textContent).toContain("Practice paused");
     click("#pause-button");
 
-    frames.shift()?.(performance.now() + 20_000);
-    expect(document.querySelector<HTMLProgressElement>("#sequence-progress-bar")?.value).toBe(100);
+    frames.shift()?.(performance.now() + 900);
+    const progress = document.querySelector<HTMLProgressElement>("#sequence-progress-bar")?.value ?? 0;
+    expect(progress).toBeGreaterThan(85);
+    expect(progress).toBeLessThan(100);
     expect(document.body.textContent).toContain("Left-click anywhere");
     window.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, cancelable: true }));
     click("#click-anywhere-target");
@@ -213,7 +222,6 @@ describe("application pages", () => {
     const wheelDrill = customDrill("wheel-drill", {
       type: "hotkey",
       action: "hotkey_19331",
-      onFailure: "restart_sequence",
     });
     localStorage.setItem(STORAGE_KEY, JSON.stringify([wheelDrill]));
     await import("../src/main");
@@ -221,7 +229,7 @@ describe("application pages", () => {
     click("#start-button");
 
     window.dispatchEvent(new WheelEvent("wheel", { deltaY: 1, cancelable: true }));
-    expect(document.body.textContent).toContain("Sequence restarted");
+    expect(document.body.textContent).toContain("Try this step again");
     window.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, cancelable: true }));
     expect(document.body.dataset.screen).toBe("results");
   });
@@ -288,8 +296,7 @@ describe("application pages", () => {
     expect(document.body.textContent).toContain("Correct. Next step");
     expect(document.querySelectorAll(".sequence-shortcut--complete")).toHaveLength(1);
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "x", code: "KeyX" }));
-    expect(document.body.textContent).toContain("Sequence restarted");
-    click("#click-anywhere-target");
+    expect(document.body.textContent).toContain("Try this step again");
     window.dispatchEvent(new KeyboardEvent("keydown", { key: ".", code: "Period" }));
     expect(document.body.textContent).toContain("Sequence complete");
     click("#click-anywhere-target");
@@ -459,7 +466,7 @@ describe("application pages", () => {
 
     const validInput = document.querySelector<HTMLInputElement>("#drill-json-file");
     if (!validInput) throw new Error("Upload input is missing.");
-    const uploadedDrill = customDrill("uploaded", { type: "click", onFailure: "wait" });
+    const uploadedDrill = customDrill("uploaded", { type: "click" });
     delete uploadedDrill.id;
     Object.defineProperty(validInput, "files", {
       configurable: true,
@@ -489,7 +496,7 @@ describe("application pages", () => {
 
     const validInput = document.querySelector<HTMLInputElement>("#drill-json-file");
     if (!validInput) throw new Error("Upload input is missing.");
-    const createdDrill = customDrill("created", { type: "click", onFailure: "wait" });
+    const createdDrill = customDrill("created", { type: "click" });
     delete createdDrill.id;
     Object.defineProperty(validInput, "files", {
       configurable: true,
@@ -559,13 +566,19 @@ describe("application pages", () => {
     history.replaceState(null, "", "/drills/create");
     await import("../src/main");
     expect(document.body.textContent).toContain("Create custom drill");
-    click("#add-hotkey-step");
-    frames.pop()?.(performance.now());
-    await vi.waitFor(() => expect(document.querySelectorAll("[data-add-action]").length).toBeGreaterThan(0));
-    click("#close-hotkey-modal");
+    changeBuilderInput("#step-search", "skirmisher");
+    const skirmisherResults = [...document.querySelectorAll<HTMLElement>("[data-add-step]")]
+      .map((item) => item.textContent);
+    expect(skirmisherResults).toEqual(expect.arrayContaining([
+      expect.stringContaining("Skirmisher — Archery Range"),
+      expect.stringContaining("Skirmisher — Settlement"),
+    ]));
+    changeBuilderInput("#step-search", "villager");
+    expect(document.querySelectorAll("[data-add-step]").length).toBeGreaterThan(0);
     changeBuilderInput("#drill-name", "Created in page");
     changeBuilderInput("#sequence-name", "One");
-    click("#add-click-step");
+    changeBuilderInput("#step-search", "left click");
+    click('[data-add-step="__left_click__"]');
     click("#save-drill");
 
     vi.resetModules();

@@ -2,24 +2,32 @@ import { describe, expect, it } from "vitest";
 
 /* @vitest-environment jsdom */
 
-import { BUILTIN_COMMAND_PANEL_BY_DRILL_ID } from "../src/builtin-command-panels";
+import { BUILTIN_COMMAND_PANELS } from "../src/builtin-command-panels";
 import {
   commandPanelState,
   renderCommandPanel,
   renderSequenceTarget,
   sequenceTargetState,
 } from "../src/command-panel";
-import type { Sequence, Session } from "../src/types";
+import type { Sequence, Session, StartingSelection } from "../src/types";
 
 const targetTimeMs = [7000, 6000, 5000, 4000, 3000, 2000, 1000] as const;
 
-function sequence(steps: Sequence["steps"]): Sequence {
+function sequence(
+  steps: Sequence["steps"],
+  startingSelection: StartingSelection = { type: "unit", id: "villager" },
+): Sequence {
   return {
     id: "test",
     name: "Test",
+    startingSelection,
     steps,
     targetTimeMs,
   };
+}
+
+function panelForDrill(drillId: string) {
+  return BUILTIN_COMMAND_PANELS.find((panel) => panel.drillId === drillId);
 }
 
 function session(currentSequence: Sequence, stepIndex: number, drillId = "villager-building-placement"): Session {
@@ -33,7 +41,6 @@ function session(currentSequence: Sequence, stepIndex: number, drillId = "villag
       id: drillId,
       name: "Test",
       sequences: [],
-      totalTimeMs: 60_000,
     },
     drillPausedMs: 0,
     finishReason: null,
@@ -51,17 +58,17 @@ function session(currentSequence: Sequence, stepIndex: number, drillId = "villag
 describe("built-in command panel", () => {
   it("renders no selection followed by the villager menu", () => {
     const current = sequence([
-      { type: "hotkey", action: "select_villager", label: "Select Villager", onFailure: "wait" },
-      { type: "hotkey", action: "open_economic_buildings", label: "Economic Buildings", onFailure: "wait" },
-    ]);
+      { type: "hotkey", action: "select_villager", label: "Select Villager" },
+      { type: "hotkey", action: "open_economic_buildings", label: "Economic Buildings" },
+    ], { type: "none" });
 
-    expect(commandPanelState("villager-building-placement", current, 0)).toEqual({
+    expect(commandPanelState(current, 0)).toEqual({
       activeAction: null,
       entries: [],
       label: "No unit selected",
       menu: "none",
     });
-    const root = commandPanelState("villager-building-placement", current, 1);
+    const root = commandPanelState(current, 1);
     expect(root).toMatchObject({
       activeAction: "open_economic_buildings",
       label: "Villager commands",
@@ -72,13 +79,13 @@ describe("built-in command panel", () => {
 
   it("keeps the selected economic building visible during placement", () => {
     const current = sequence([
-      { type: "hotkey", action: "open_economic_buildings", label: "Economic Buildings", onFailure: "wait" },
-      { type: "hotkey", action: "build_university", label: "University", onFailure: "restart_sequence" },
-      { type: "click", label: "Place building", onFailure: "wait" },
+      { type: "hotkey", action: "open_economic_buildings", label: "Economic Buildings" },
+      { type: "hotkey", action: "build_university", label: "University" },
+      { type: "click", label: "Place building" },
     ]);
 
-    const building = commandPanelState("villager-building-placement", current, 1);
-    const placement = commandPanelState("villager-building-placement", current, 2);
+    const building = commandPanelState(current, 1);
+    const placement = commandPanelState(current, 2);
     expect(building).toMatchObject({
       activeAction: "build_university",
       label: "Economic buildings",
@@ -91,11 +98,11 @@ describe("built-in command panel", () => {
 
   it("uses the fixed military slots and rejects unsupported contexts", () => {
     const current = sequence([
-      { type: "hotkey", action: "open_military_buildings", label: "Military Buildings", onFailure: "wait" },
-      { type: "hotkey", action: "build_castle", label: "Castle", onFailure: "restart_sequence" },
+      { type: "hotkey", action: "open_military_buildings", label: "Military Buildings" },
+      { type: "hotkey", action: "build_castle", label: "Castle" },
     ]);
 
-    const military = commandPanelState("villager-building-placement", current, 1);
+    const military = commandPanelState(current, 1);
     expect(military).toMatchObject({
       activeAction: "build_castle",
       label: "Military buildings",
@@ -103,37 +110,41 @@ describe("built-in command panel", () => {
     });
     expect(military?.entries).toHaveLength(10);
     expect(military?.entries.find((entry) => entry.action === "build_castle")?.slot).toBe(12);
-    expect(commandPanelState("custom-drill", current, 1)).toBeNull();
-    expect(commandPanelState("villager-building-placement", current, 99)).toBeNull();
+    expect(commandPanelState(current, 1)).toMatchObject({ menu: "military" });
+    expect(commandPanelState(current, 99)).toBeNull();
     expect(commandPanelState(
-      "villager-building-placement",
-      sequence([{ type: "click", label: "Click", onFailure: "wait" }]),
+      sequence(
+        [{ type: "click", label: "Click" }],
+        { type: "none" },
+      ),
       0,
     )).toBeNull();
   });
 
   it("renders captured building and unit panels for their permanent built-in drills", () => {
-    const barracks = BUILTIN_COMMAND_PANEL_BY_DRILL_ID.get("barracks-commands");
+    const barracks = panelForDrill("barracks-commands");
     const current = sequence([
-      { type: "hotkey", action: "hotkey_19035", label: "Militia", onFailure: "restart_sequence" },
-      { type: "click", label: "Continue", onFailure: "wait" },
-    ]);
+      { type: "hotkey", action: "hotkey_19035", label: "Militia" },
+      { type: "click", label: "Continue" },
+    ], { type: "building", id: "barracks" });
 
-    expect(commandPanelState("barracks-commands", current, 0)).toEqual({
+    expect(commandPanelState(current, 0)).toEqual({
       activeAction: "hotkey_19035",
       entries: barracks?.entries,
       label: "Barracks Commands",
       menu: "barracks",
     });
-    expect(commandPanelState("barracks-commands", current, 1)).toMatchObject({
+    expect(commandPanelState(current, 1)).toMatchObject({
       activeAction: "hotkey_19035",
       menu: "barracks",
     });
     expect(commandPanelState(
-      "barracks-commands",
-      sequence([{ type: "hotkey", action: "select_villager", label: "Select", onFailure: "wait" }]),
+      sequence(
+        [{ type: "hotkey", action: "select_villager", label: "Select" }],
+        { type: "building", id: "barracks" },
+      ),
       0,
-    )).toBeNull();
+    )).toMatchObject({ activeAction: null, menu: "barracks" });
 
     const panel = renderCommandPanel(
       session(current, 0, "barracks-commands"),
@@ -147,8 +158,8 @@ describe("built-in command panel", () => {
   });
 
   it("maps the corrected Siege Workshop upgrades and archery icon", () => {
-    const siege = BUILTIN_COMMAND_PANEL_BY_DRILL_ID.get("siege-workshop-commands");
-    const archery = BUILTIN_COMMAND_PANEL_BY_DRILL_ID.get("archery-range-commands");
+    const siege = panelForDrill("siege-workshop-commands");
+    const archery = panelForDrill("archery-range-commands");
 
     expect(siege?.entries.find((entry) => entry.action === "hotkey_19475")).toMatchObject({
       label: "Tech: Capped, Siege Ram",
@@ -172,7 +183,7 @@ describe("built-in command panel", () => {
       slot: 11,
     });
     expect(archery?.entries.some((entry) => entry.slot === 14)).toBe(false);
-    expect(BUILTIN_COMMAND_PANEL_BY_DRILL_ID.get("castle-commands")?.entries.find(
+    expect(panelForDrill("castle-commands")?.entries.find(
       (entry) => entry.action === "hotkey_19084",
     )).toMatchObject({
       label: "Tech: Sappers",
@@ -181,7 +192,10 @@ describe("built-in command panel", () => {
 
     const siegePanel = renderCommandPanel(
       session(
-        sequence([{ type: "hotkey", action: "hotkey_19476", label: "Onager", onFailure: "wait" }]),
+        sequence(
+          [{ type: "hotkey", action: "hotkey_19476", label: "Onager" }],
+          { type: "building", id: "siege-workshop" },
+        ),
         0,
         "siege-workshop-commands",
       ),
@@ -189,7 +203,10 @@ describe("built-in command panel", () => {
     );
     const archeryPanel = renderCommandPanel(
       session(
-        sequence([{ type: "hotkey", action: "hotkey_19149", label: "Elite", onFailure: "wait" }]),
+        sequence(
+          [{ type: "hotkey", action: "hotkey_19149", label: "Elite" }],
+          { type: "building", id: "archery-range" },
+        ),
         0,
         "archery-range-commands",
       ),
@@ -200,7 +217,7 @@ describe("built-in command panel", () => {
   });
 
   it("uses the Dravidian Dock commands and the shared Gate icon for rotation", () => {
-    const dock = BUILTIN_COMMAND_PANEL_BY_DRILL_ID.get("dock-commands");
+    const dock = panelForDrill("dock-commands");
     expect(dock?.entries.find((entry) => entry.action === "hotkey_19002")).toMatchObject({
       label: "Set Gather Point",
       slot: 4,
@@ -211,7 +228,7 @@ describe("built-in command panel", () => {
     });
     expect(dock?.entries.some((entry) => entry.action === "hotkey_19217")).toBe(false);
 
-    const gate = BUILTIN_COMMAND_PANEL_BY_DRILL_ID.get("gate-commands");
+    const gate = panelForDrill("gate-commands");
     expect(gate?.entries.map((entry) => [entry.action, entry.slot])).toEqual([
       ["hotkey_19122", 0],
       ["hotkey_19331", 0],
@@ -223,8 +240,7 @@ describe("built-in command panel", () => {
           type: "hotkey",
           action: "hotkey_19331",
           label: "Rotate Gate Clockwise",
-          onFailure: "wait",
-        }]),
+        }], { type: "building", id: "gate" }),
         0,
         "gate-commands",
       ),
@@ -237,19 +253,19 @@ describe("built-in command panel", () => {
   });
 
   it("maps the captured siege and ship unit panels", () => {
-    expect(BUILTIN_COMMAND_PANEL_BY_DRILL_ID.get("siege-unit-commands")?.entries).toHaveLength(9);
-    expect(BUILTIN_COMMAND_PANEL_BY_DRILL_ID.get("fishing-ship-commands")?.entries).toEqual(
+    expect(panelForDrill("siege-unit-commands")?.entries).toHaveLength(9);
+    expect(panelForDrill("fishing-ship-commands")?.entries).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ action: "hotkey_19202", label: "Fish Trap", slot: 0 }),
         expect.objectContaining({ action: "hotkey_400017", label: "Seek Shelter", slot: 8 }),
-        expect.objectContaining({ action: "hotkey_19123", label: "Rebuild Fish Trap", slot: 10 }),
+        expect.objectContaining({ action: "hotkey_19123", label: "Rebuild Fish Trap — Dock", slot: 10 }),
         expect.objectContaining({ action: "hotkey_19101", slot: 11 }),
       ]),
     );
-    expect(BUILTIN_COMMAND_PANEL_BY_DRILL_ID.get("trade-cog-commands")?.entries).toEqual([
+    expect(panelForDrill("trade-cog-commands")?.entries).toEqual([
       expect.objectContaining({ action: "hotkey_419057", label: "Toggle Trading Ratio", slot: 2 }),
     ]);
-    expect(BUILTIN_COMMAND_PANEL_BY_DRILL_ID.get("transport-ship-commands")?.entries).toEqual([
+    expect(panelForDrill("transport-ship-commands")?.entries).toEqual([
       expect.objectContaining({ action: "hotkey_19225", label: "Unload", slot: 0 }),
       expect.objectContaining({ action: "hotkey_19216", label: "Stop", slot: 9 }),
     ]);
@@ -281,9 +297,9 @@ describe("built-in command panel", () => {
       ["trebuchet-unit-commands", [0, 5, 8, 10, 11, 12, 13]],
     ]);
     expect([...auditedVisibleSlots.keys()]).toEqual(
-      [...BUILTIN_COMMAND_PANEL_BY_DRILL_ID.keys()],
+      BUILTIN_COMMAND_PANELS.map((panel) => panel.drillId),
     );
-    for (const panel of BUILTIN_COMMAND_PANEL_BY_DRILL_ID.values()) {
+    for (const panel of BUILTIN_COMMAND_PANELS) {
       const coveredSlots = new Set([
         ...panel.entries.map((entry) => entry.slot),
         ...(panel.visualAlternatives ?? []).map((alternative) => alternative.slot),
@@ -303,18 +319,18 @@ describe("built-in command panel", () => {
       "castle-commands",
     ];
     for (const drillId of gatherPointPanels) {
-      expect(BUILTIN_COMMAND_PANEL_BY_DRILL_ID.get(drillId)?.entries).toContainEqual(
+      expect(panelForDrill(drillId)?.entries).toContainEqual(
         expect.objectContaining({ action: "hotkey_19002", label: "Set Gather Point", slot: 4 }),
       );
     }
 
     for (const drillId of ["military-unit-commands", "monk-unit-commands"]) {
-      expect(BUILTIN_COMMAND_PANEL_BY_DRILL_ID.get(drillId)?.entries).toContainEqual(
+      expect(panelForDrill(drillId)?.entries).toContainEqual(
         expect.objectContaining({ action: "hotkey_400017", label: "Seek Shelter", slot: 4 }),
       );
     }
 
-    expect(BUILTIN_COMMAND_PANEL_BY_DRILL_ID.get("university-commands")?.entries.slice(-4))
+    expect(panelForDrill("university-commands")?.entries.slice(-4))
       .toEqual([
         expect.objectContaining({ action: "hotkey_19342", slot: 10 }),
         expect.objectContaining({ action: "hotkey_19356", slot: 11 }),
@@ -322,7 +338,7 @@ describe("built-in command panel", () => {
         expect.objectContaining({ action: "hotkey_19357", slot: 13 }),
       ]);
 
-    const alternatives = [...BUILTIN_COMMAND_PANEL_BY_DRILL_ID.values()]
+    const alternatives = BUILTIN_COMMAND_PANELS
       .filter((panel) => panel.visualAlternatives);
     expect(alternatives.map((panel) => [
       panel.drillId,
@@ -341,19 +357,39 @@ describe("built-in command panel", () => {
 
   it("keeps valid shortcuts usable when no simulated menu is defined", () => {
     const current = sequence([
-      { type: "hotkey", action: "hotkey_19035", label: "Militia-line", onFailure: "wait" },
-    ]);
+      { type: "hotkey", action: "hotkey_19035", label: "Militia-line" },
+    ], { type: "none" });
 
-    expect(commandPanelState("custom-drill", current, 0)).toBeNull();
+    expect(commandPanelState(current, 0)).toBeNull();
     expect(renderCommandPanel(session(current, 0, "custom-drill"), () => [
       { key: "Q", ctrl: false, alt: false, shift: false },
     ])).toBeNull();
   });
 
-  it("resolves a centered target from captured, building, custom, and villager menus", () => {
+  it("uses deterministic representatives for mixed Select all actions", () => {
+    const idleMilitary = sequence([
+      { type: "hotkey", action: "hotkey_19140", label: "Select all idle military units" },
+      { type: "hotkey", action: "hotkey_19312", label: "Move" },
+    ], { type: "none" });
+    expect(commandPanelState(idleMilitary, 0)).toMatchObject({ menu: "none" });
+    expect(commandPanelState(idleMilitary, 1)).toMatchObject({
+      activeAction: "hotkey_19312",
+      menu: "military-unit",
+    });
+
+    const unsupportedGroup = sequence([
+      { type: "hotkey", action: "hotkey_419068", label: "Select all naval heroes" },
+      { type: "click", label: "Continue" },
+    ], { type: "building", id: "barracks" });
+    expect(commandPanelState(unsupportedGroup, 1)).toBeNull();
+  });
+
+  it("resolves targets from explicit context without guessing shared actions", () => {
     expect(sequenceTargetState(
-      "barracks-commands",
-      sequence([{ type: "hotkey", action: "hotkey_19035", label: "Militia", onFailure: "wait" }]),
+      sequence(
+        [{ type: "hotkey", action: "hotkey_19035", label: "Militia" }],
+        { type: "building", id: "barracks" },
+      ),
     )).toMatchObject({
       asset: "barracks-panel.png",
       category: "Barracks Commands",
@@ -361,21 +397,27 @@ describe("built-in command panel", () => {
       slot: 0,
     });
     expect(sequenceTargetState(
-      "barracks-commands",
-      sequence([{ type: "hotkey", action: "select_villager", label: "Select", onFailure: "wait" }]),
+      sequence(
+        [{ type: "hotkey", action: "select_villager", label: "Select" }],
+        { type: "none" },
+      ),
     )).toBeNull();
 
     expect(sequenceTargetState(
-      "custom",
-      sequence([{ type: "hotkey", action: "build_university", label: "University", onFailure: "wait" }]),
+      sequence([
+        { type: "hotkey", action: "open_economic_buildings", label: "Economic" },
+        { type: "hotkey", action: "build_university", label: "University" },
+      ]),
     )).toMatchObject({
       asset: "economic-buildings-panel.png",
       category: "Economic building",
       slot: 9,
     });
     expect(sequenceTargetState(
-      "custom",
-      sequence([{ type: "hotkey", action: "build_castle", label: "Castle", onFailure: "wait" }]),
+      sequence([
+        { type: "hotkey", action: "open_military_buildings", label: "Military" },
+        { type: "hotkey", action: "build_castle", label: "Castle" },
+      ]),
     )).toMatchObject({
       asset: "military-buildings-panel.png",
       category: "Military building",
@@ -383,23 +425,20 @@ describe("built-in command panel", () => {
     });
 
     expect(sequenceTargetState(
-      "custom",
       sequence([
-        { type: "hotkey", action: "hotkey_19035", label: "Militia", onFailure: "wait" },
-        { type: "click", label: "Continue", onFailure: "wait" },
-      ]),
+        { type: "hotkey", action: "hotkey_19035", label: "Militia" },
+        { type: "click", label: "Continue" },
+      ], { type: "building", id: "barracks" }),
     )).toMatchObject({
       asset: "barracks-panel.png",
       category: "Barracks Commands",
       slot: 0,
     });
     expect(sequenceTargetState(
-      "custom",
       sequence([{
         type: "hotkey",
         action: "open_military_buildings",
         label: "Military Buildings",
-        onFailure: "wait",
       }]),
     )).toMatchObject({
       asset: "villager-command-panel.png",
@@ -407,16 +446,32 @@ describe("built-in command panel", () => {
       slot: 1,
     });
     expect(sequenceTargetState(
-      "custom",
-      sequence([{ type: "click", label: "Continue", onFailure: "wait" }]),
+      sequence(
+        [{ type: "click", label: "Continue" }],
+        { type: "none" },
+      ),
     )).toBeNull();
+
+    const sharedAction = "hotkey_19002";
+    expect(sequenceTargetState(sequence(
+      [{ type: "hotkey", action: sharedAction, label: "Set Gather Point" }],
+      { type: "building", id: "barracks" },
+    ))?.asset).toBe("barracks-panel.png");
+    expect(sequenceTargetState(sequence(
+      [{ type: "hotkey", action: sharedAction, label: "Set Gather Point" }],
+      { type: "building", id: "dock" },
+    ))?.asset).toBe("dock-panel.png");
+    expect(sequenceTargetState(sequence(
+      [{ type: "hotkey", action: sharedAction, label: "Set Gather Point" }],
+      { type: "none" },
+    ))).toBeNull();
   });
 
   it("renders the game icon and left-click instruction for the sequence target", () => {
     const current = sequence([
-      { type: "hotkey", action: "hotkey_19035", label: "Militia", onFailure: "wait" },
-      { type: "click", label: "Continue", onFailure: "wait" },
-    ]);
+      { type: "hotkey", action: "hotkey_19035", label: "Militia" },
+      { type: "click", label: "Continue" },
+    ], { type: "building", id: "barracks" });
     const target = renderSequenceTarget(session(current, 1, "barracks-commands"));
 
     expect(target.getAttribute("aria-label")).toBe("Target: Test");
@@ -429,7 +484,7 @@ describe("built-in command panel", () => {
     expect(target.querySelector("img")?.classList.contains("sequence-target__sprite--slot-0")).toBe(true);
 
     const fallback = renderSequenceTarget(session(
-      sequence([{ type: "hotkey", action: "unknown", label: "Unknown", onFailure: "wait" }]),
+      sequence([{ type: "hotkey", action: "unknown", label: "Unknown" }]),
       0,
       "custom",
     ));
@@ -441,15 +496,15 @@ describe("built-in command panel", () => {
 
   it("renders empty, active, mapped, and unmapped tiles accessibly", () => {
     const selection = sequence([
-      { type: "hotkey", action: "select_villager", label: "Select Villager", onFailure: "wait" },
-    ]);
+      { type: "hotkey", action: "select_villager", label: "Select Villager" },
+    ], { type: "none" });
     const empty = renderCommandPanel(session(selection, 0), () => []);
     expect(empty?.classList.contains("command-panel--none")).toBe(true);
     expect(empty?.textContent).toContain("Awaiting selection");
     expect(empty?.querySelectorAll(".command-tile--empty")).toHaveLength(15);
 
     const rootSequence = sequence([
-      { type: "hotkey", action: "open_military_buildings", label: "Military Buildings", onFailure: "wait" },
+      { type: "hotkey", action: "open_military_buildings", label: "Military Buildings" },
     ]);
     const root = renderCommandPanel(session(rootSequence, 0), (action) =>
       action === "open_military_buildings"
@@ -459,6 +514,6 @@ describe("built-in command panel", () => {
     expect(root?.querySelector(".command-tile--active")?.getAttribute("aria-label")).toBe("Military Buildings, shortcut W");
     expect(root?.querySelector('[aria-label="Economic Buildings, unmapped"] kbd')?.textContent).toBe("—");
     expect(root?.querySelector("svg")).toBeNull();
-    expect(renderCommandPanel(session(rootSequence, 0, "custom"), () => [])).toBeNull();
+    expect(renderCommandPanel(session(rootSequence, 0, "custom"), () => [])).not.toBeNull();
   });
 });

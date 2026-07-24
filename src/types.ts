@@ -9,28 +9,60 @@ export const DIFFICULTIES = [
 ] as const;
 
 export type Difficulty = (typeof DIFFICULTIES)[number];
-export type FailureHandling = "wait" | "restart_sequence";
 
 export interface HotkeyStep {
   type: "hotkey";
   action: string;
   label: string;
   tip?: string;
-  onFailure: FailureHandling;
 }
 
 export interface ClickStep {
   type: "click";
   label: string;
   tip?: string;
-  onFailure: FailureHandling;
 }
 
 export type Step = HotkeyStep | ClickStep;
 
+export type BuildingSelectionId =
+  | "archery-range"
+  | "barracks"
+  | "blacksmith"
+  | "castle"
+  | "dock"
+  | "gate"
+  | "lumber-camp"
+  | "market"
+  | "mill"
+  | "mining-camp"
+  | "monastery"
+  | "siege-workshop"
+  | "stable"
+  | "town-center"
+  | "university";
+
+export type UnitSelectionId =
+  | "archer"
+  | "cavalry"
+  | "fishing-ship"
+  | "infantry"
+  | "monk"
+  | "siege-unit"
+  | "trade-cog"
+  | "transport-ship"
+  | "trebuchet"
+  | "villager";
+
+export type StartingSelection =
+  | { type: "none" }
+  | { type: "building"; id: BuildingSelectionId }
+  | { type: "unit"; id: UnitSelectionId };
+
 export interface SequenceTemplate {
   id: string;
   name: string;
+  startingSelection: StartingSelection;
   steps: ReadonlyArray<Step>;
   targetTimeMs: readonly [number, number, number, number, number, number, number];
 }
@@ -38,6 +70,7 @@ export interface SequenceTemplate {
 export interface Sequence {
   id: string;
   name: string;
+  startingSelection: StartingSelection;
   steps: Step[];
   targetTimeMs: SequenceTemplate["targetTimeMs"];
 }
@@ -46,7 +79,6 @@ export interface Drill {
   id: string;
   name: string;
   description: string;
-  totalTimeMs: number;
   sequences: SequenceTemplate[];
 }
 

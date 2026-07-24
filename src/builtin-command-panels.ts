@@ -403,6 +403,6 @@ export const BUILTIN_COMMAND_PANELS: readonly BuiltinCommandPanelDefinition[] = 
   },
 ];
 
-export const BUILTIN_COMMAND_PANEL_BY_DRILL_ID = new Map(
-  BUILTIN_COMMAND_PANELS.map((panel) => [panel.drillId, panel]),
+export const BUILTIN_COMMAND_PANEL_BY_ID = new Map(
+  BUILTIN_COMMAND_PANELS.map((panel) => [panel.id, panel]),
 );

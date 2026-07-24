@@ -16,7 +16,23 @@ function materializeSequence(template: SequenceTemplate): Sequence {
       : { ...step }
   );
 
-  return { id: template.id, name: template.name, steps, targetTimeMs: template.targetTimeMs };
+  return {
+    id: template.id,
+    name: template.name,
+    startingSelection: template.startingSelection,
+    steps,
+    targetTimeMs: template.targetTimeMs,
+  };
+}
+
+export function getDrillTargetTimeMs(drill: Drill, difficultyIndex: number): number {
+  return drill.sequences.reduce((total, sequence) => {
+    const target = sequence.targetTimeMs[difficultyIndex];
+    if (target === undefined) {
+      throw new Error("The selected difficulty has no target time.");
+    }
+    return total + target;
+  }, 0);
 }
 
 export function createSession(
@@ -55,7 +71,10 @@ export function getSequenceElapsedMs(session: Session, now: number): number {
 }
 
 export function tickSession(session: Session, now: number): Session {
-  if (session.status === "finished" || getDrillElapsedMs(session, now) < session.drill.totalTimeMs) {
+  if (
+    session.status === "finished"
+    || getDrillElapsedMs(session, now) < getDrillTargetTimeMs(session.drill, session.difficultyIndex)
+  ) {
     return session;
   }
   return { ...session, status: "finished", finishReason: "time", pausedAt: null };
@@ -106,9 +125,7 @@ export function submitAttempt(
   };
 
   if (!correct) {
-    return activeStep.onFailure === "restart_sequence"
-      ? { ...attempted, stepIndex: 0 }
-      : attempted;
+    return attempted;
   }
 
   const nextStepIndex = session.stepIndex + 1;

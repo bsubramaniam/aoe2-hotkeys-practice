@@ -2,16 +2,20 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { BUILTIN_COMMAND_PANELS } from "../src/builtin-command-panels";
+import { commandPanelState } from "../src/command-panel";
 import { createDefaultProfile } from "../src/default-profile";
 import { BUILTIN_DRILLS, getRequiredActions, hotkeyStep } from "../src/drills";
 import { actionsForStringIds, getHotkeyAction, HOTKEY_ACTIONS } from "../src/hotkey-actions";
+import { getDrillTargetTimeMs } from "../src/trainer";
 
 describe("built-in drill", () => {
-  it("allows more total time than all sequences at the Easy target", () => {
+  it("calculates total time as the sum of sequence targets for each difficulty", () => {
     const drill = BUILTIN_DRILLS[0];
-    expect(drill?.totalTimeMs).toBe(137_000);
-    expect(drill!.totalTimeMs).toBeGreaterThan(
-      drill!.sequences.length * drill!.sequences[0]!.targetTimeMs[0],
+    expect(getDrillTargetTimeMs(drill!, 0)).toBe(
+      drill!.sequences.reduce((sum, sequence) => sum + sequence.targetTimeMs[0], 0),
+    );
+    expect(getDrillTargetTimeMs(drill!, 6)).toBe(
+      drill!.sequences.reduce((sum, sequence) => sum + sequence.targetTimeMs[6], 0),
     );
   });
 
@@ -56,18 +60,20 @@ describe("built-in drill", () => {
         description: panel.description,
         id: panel.drillId,
         name: panel.name,
-        totalTimeMs: panel.entries.length * 4000,
       });
       expect(drill?.sequences.map((sequence) => sequence.steps[0])).toEqual(
         panel.entries.map((entry) => ({
           action: entry.action,
           label: entry.label,
-          onFailure: "restart_sequence",
           type: "hotkey",
         })),
       );
-      expect(drill!.totalTimeMs).toBeGreaterThan(
-        drill!.sequences.length * drill!.sequences[0]!.targetTimeMs[0],
+      for (const sequence of drill?.sequences ?? []) {
+        expect(commandPanelState({ ...sequence, steps: [...sequence.steps] }, 0)?.menu)
+          .toBe(panel.id);
+      }
+      expect(getDrillTargetTimeMs(drill!, 0)).toBe(
+        drill!.sequences.reduce((sum, sequence) => sum + sequence.targetTimeMs[0], 0),
       );
     }
   });
@@ -76,7 +82,6 @@ describe("built-in drill", () => {
     const drill = BUILTIN_DRILLS.find((candidate) => candidate.id === "quick-walling");
     expect(drill).toMatchObject({
       name: "Quick Walling",
-      totalTimeMs: 65_000,
     });
     expect(drill?.sequences).toHaveLength(10);
     expect(drill?.sequences.filter((sequence) => sequence.name.startsWith("Palisade Wall"))).toHaveLength(5);
@@ -106,6 +111,17 @@ describe("built-in drill", () => {
     expect(getHotkeyAction("select_all_town_centers")).toMatchObject({ stringId: 19021 });
   });
 
+  it("gives every searchable action a unique context-aware label", () => {
+    const actions = [...HOTKEY_ACTIONS.values()];
+    const normalizedLabels = actions.map((action) => action.label.trim().toLowerCase());
+
+    expect(new Set(normalizedLabels).size).toBe(normalizedLabels.length);
+    expect(getHotkeyAction("hotkey_19043")?.label).toBe("Skirmisher — Archery Range");
+    expect(getHotkeyAction("hotkey_19179")?.label).toBe("Skirmisher — Settlement");
+    expect(getHotkeyAction("hotkey_19087")?.label).toBe("Zoom In — Mouse wheel");
+    expect(getHotkeyAction("hotkey_19089")?.label).toBe("Zoom In — Keyboard");
+  });
+
   it("supports dynamic numeric action IDs and rejects malformed IDs", () => {
     expect(getHotkeyAction("hotkey_999999")).toEqual({
       id: "hotkey_999999",
@@ -125,21 +141,21 @@ describe("built-in drill", () => {
       id: "requirements",
       name: "Requirements",
       description: "Test",
-      totalTimeMs: 1000,
       sequences: [{
         id: "one",
         name: "One",
+        startingSelection: { type: "none" as const },
         targetTimeMs: [1, 1, 1, 1, 1, 1, 1] as const,
         steps: [
-          { type: "hotkey" as const, action: "select_villager", label: "Select", onFailure: "wait" as const },
-          { type: "hotkey" as const, action: "select_villager", label: "Select", onFailure: "wait" as const },
-          { type: "hotkey" as const, action: "invalid", label: "Invalid", onFailure: "wait" as const },
-          { type: "click" as const, label: "Click", onFailure: "wait" as const },
+          { type: "hotkey" as const, action: "select_villager", label: "Select" },
+          { type: "hotkey" as const, action: "select_villager", label: "Select" },
+          { type: "hotkey" as const, action: "invalid", label: "Invalid" },
+          { type: "click" as const, label: "Click" },
         ],
       }],
     };
     expect(getRequiredActions(drill).map((action) => action.id)).toEqual(["select_villager"]);
-    expect(() => hotkeyStep("invalid", "wait")).toThrow("Unknown hotkey action");
+    expect(() => hotkeyStep("invalid")).toThrow("Unknown hotkey action");
   });
 
   it("uses current installed-game labels for newer profile actions", () => {
